@@ -77,8 +77,9 @@ graph TD
    - Pod żadnym pozorem nie umieszczać fragmentów rzeczywistych rozmów biznesowych z klientami w kodzie źródłowym, komentarzach, docstringach, testach jednostkowych ani w commitach.
    - Wszystkie przykłady dialogów, imion i poleceń w kodzie muszą być w 100% zanonimizowane i generyczne (np. Jan, Piotr, Tomasz, Anna).
    - Pliki `.txt`, nagrania `.wav` oraz folder `scratch/` muszą pozostać wykluczone w `.gitignore`.
-2. **Git Workflow i Autonomia Użytkownika:**
-   - **Nie tworzyć automatycznie commitów (`git commit`)**, nie pushować (`git push`) ani nie merge'ować gałęzi bez wyraźnej prośby lub zgody użytkownika.
+2. **Git Workflow, Lokalne Commity i Ochrona Mastera:**
+   - **Lokalne commity na gałęziach funkcyjnych:** Dozwolone i zalecane! Po zrealizowaniu logicznego fragmentu prac (np. ukończeniu kamienia milowego lub podzadania) należy utworzyć lokalny `git commit` z czytelnym komunikatem (np. `feat(ui): ...`, `fix(...)`). Tworzenie lokalnych commitów zabezpiecza postęp prac przed utratą (np. w razie wyczerpania limitu sesji) i ułatwia przegląd historii zmian.
+   - **Bezwzględna ochrona zdalnego repozytorium i mastera:** ZAKAZ wykonywania `git push` do zdalnego repozytorium oraz zakaz dotykania/merge'owania do gałęzi `master` (lub `main`) bez wyraźnej, bezpośredniej prośby lub zgody użytkownika.
 3. **Samouczenie Agenta:**
    - Asystent ma stałą zgodę na proaktywne aktualizowanie ustaleń technicznych i zasad bezpośrednio w tym pliku `.agents/rules/architecture.md`.
 4. **Sprzęt i Optymalizacje Audio w Windows:**
