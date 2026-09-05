@@ -2,6 +2,7 @@ import os
 import sys
 import gc
 import types
+import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional, Callable
 
@@ -497,6 +498,7 @@ class DiarizationEngine:
                     sentence = join_words_clean(cur_words)
                     if sentence:
                         turns.append({
+                            "id": str(uuid.uuid4()),
                             "start": cur_start,
                             "end": cur_end,
                             "speaker": cur_spk,
@@ -513,6 +515,7 @@ class DiarizationEngine:
                 sentence = join_words_clean(cur_words)
                 if sentence:
                     turns.append({
+                        "id": str(uuid.uuid4()),
                         "start": cur_start,
                         "end": cur_end,
                         "speaker": cur_spk,
@@ -606,6 +609,7 @@ def format_transcript_without_diarization(transcript_words: List[Dict[str, Any]]
 
     for start_t, end_t, text in chunks:
         turns.append({
+            "id": str(uuid.uuid4()),
             "start": start_t,
             "end": end_t,
             "speaker": "Mówca",

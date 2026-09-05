@@ -2,8 +2,11 @@ import os
 import sys
 import time
 import uuid
+import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+
+logger = logging.getLogger("recorder.ui.window")
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QFont, QDesktopServices, QIcon, QPixmap, QPainter, QColor
@@ -65,7 +68,8 @@ from recorder.core.session import (
     get_session_path_for_txt,
     get_session_path_for_audio,
     find_existing_session_for_audio,
-    extract_datetime_from_filename
+    extract_datetime_from_filename,
+    get_turn_sync_id
 )
 from recorder.core.cloud_sync import CloudSyncManager
 
@@ -1522,6 +1526,17 @@ class SmartDictaphoneWindow(QMainWindow):
             self.lbl_cloud_status.setText(f"🟢 Transmisja na żywo do {target_name} aktywna...")
             self.lbl_cloud_status.setStyleSheet("color: #4cc9f0; font-size: 11px; font-weight: bold;")
 
+        mode_text = self.combo_source_mode.currentText() if hasattr(self, "combo_source_mode") else "N/A"
+        mode_data = self.combo_source_mode.currentData() if hasattr(self, "combo_source_mode") else "N/A"
+        mic_text = self.combo_devices.currentText() if hasattr(self, "combo_devices") else "N/A"
+        sys_text = self.combo_loopback_devices.currentText() if hasattr(self, "combo_loopback_devices") else "N/A"
+        app_text = self.combo_target_apps.currentText() if hasattr(self, "combo_target_apps") else "N/A"
+        logger.info(
+            f"[SESJA START] Rozpoczęto nagrywanie: tryb='{mode_text}' ({mode_data}), "
+            f"mikrofon='{mic_text}', loopback='{sys_text}', aplikacja='{app_text}', "
+            f"model='{selected_model}', meeting_id='{self.current_meeting_id}'"
+        )
+
         # Ustawienie estetycznego komunikatu oczekiwania na pierwszy zweryfikowany blok mowy
         self.text_transcript.setHtml(
             "<div style='color: #4cc9f0; font-size: 13px; padding: 10px;'>"
@@ -1618,12 +1633,16 @@ class SmartDictaphoneWindow(QMainWindow):
 
         # Transmisja na żywo nowych segmentów do Supabase / CRM
         if self.cloud_sync.config.get("live_streaming") and self.cloud_sync.config.get("auto_sync") and self.current_meeting_id:
-            new_segments = [t for t in (all_turns or []) if id(t) not in self._synced_turn_ids]
+            new_segments = [t for t in (all_turns or []) if get_turn_sync_id(t) not in self._synced_turn_ids]
             if new_segments:
                 for t in new_segments:
-                    self._synced_turn_ids.add(id(t))
+                    self._synced_turn_ids.add(get_turn_sync_id(t))
                 self.synced_segment_count = len(self._synced_turn_ids)
                 spk_cnt = len(set(t.get("speaker", "Mówca") for t in (all_turns or []) if t.get("speaker")))
+                logger.info(
+                    f"[LIVE SYNC] Blok #{block_idx}: +{len(new_segments)} nowych segmentów "
+                    f"(łącznie w sesji: {self.synced_segment_count}, unikalni mówcy: {spk_cnt})"
+                )
                 self.cloud_sync.append_live_segments_async(
                     meeting_id=self.current_meeting_id,
                     new_segments=new_segments,

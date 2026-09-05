@@ -314,13 +314,21 @@ class CloudSyncManager:
         if new_segments:
             rows = []
             for s in new_segments:
-                rows.append({
+                row = {
                     "meeting_id": meeting_id,
                     "speaker_name": s.get("speaker", "Mówca"),
                     "start_time": float(s.get("start", 0.0)),
                     "end_time": float(s.get("end", 0.0)),
                     "text": str(s.get("text", "")).strip()
-                })
+                }
+                turn_id = s.get("id")
+                if turn_id:
+                    try:
+                        uuid.UUID(str(turn_id))
+                        row["id"] = str(turn_id)
+                    except (ValueError, TypeError):
+                        pass
+                rows.append(row)
             try:
                 req = urllib.request.Request(
                     f"{url}/rest/v1/meeting_segments",
@@ -330,7 +338,14 @@ class CloudSyncManager:
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     if resp.status in (200, 201, 204):
-                        logger.debug(f"[LIVE STREAM] Pomyślnie wysłano {len(rows)} segmentów do meeting_segments ({meeting_id})")
+                        logger.info(f"[LIVE STREAM] Pomyślnie wysłano {len(rows)} segmentów do meeting_segments ({meeting_id})")
+            except urllib.error.HTTPError as he:
+                err_body = ""
+                try:
+                    err_body = he.read().decode("utf-8")
+                except Exception:
+                    pass
+                logger.error(f"[LIVE STREAM] Błąd HTTP {he.code} wysyłki meeting_segments: {he.reason} - {err_body}")
             except Exception as e:
                 logger.warning(f"[LIVE STREAM] Błąd wysyłki meeting_segments: {e}")
 

@@ -91,6 +91,21 @@ def turn_sort_key(turn: Dict[str, Any], session_start_time: Optional[datetime] =
     return (ws, st)
 
 
+def get_turn_sync_id(turn: Dict[str, Any]) -> str:
+    """
+    Zwraca stabilny identyfikator wypowiedzi (turn), odporny na serializację
+    i rekonstrukcję słowników przez mechanizm sygnałów PySide6.
+    """
+    tid = turn.get("id") or turn.get("turn_id")
+    if tid:
+        return str(tid)
+    ch = str(turn.get("channel", "mic"))
+    st = round(float(turn.get("start", 0.0)), 2)
+    en = round(float(turn.get("end", 0.0)), 2)
+    txt = str(turn.get("text", "")).strip()
+    return f"{ch}_{st}_{en}_{txt}"
+
+
 class TranscriptionSession:
     """
     Struktura danych reprezentująca kompletną sesję transkrypcji i diaryzacji.

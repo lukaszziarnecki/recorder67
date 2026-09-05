@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import queue
+import uuid
 import numpy as np
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -315,6 +316,8 @@ class RollingTranscriptionWorker(QThread):
                     b_wall_st = datetime.now() - timedelta(seconds=dur)
 
             for trn in block_turns:
+                if not trn.get("id"):
+                    trn["id"] = str(uuid.uuid4())
                 trn["channel"] = block.channel_source
                 if trn.get("speaker") in ("Mówca", None, "", "Ty / Biuro", "Zdalny (Discord/Teams)"):
                     trn["speaker"] = default_spk
