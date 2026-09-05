@@ -5,8 +5,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QFont, QDesktopServices, QIcon, QPixmap, QPainter, QColor
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QByteArray, QDataStream
+from PySide6.QtGui import QFont, QDesktopServices, QIcon, QPixmap, QPainter, QColor, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QProgressBar, QListWidget,
@@ -36,7 +36,11 @@ from recorder.config import (
     get_loopback_device_index,
     get_silence_alert_seconds,
     get_session_split_silence_sec,
-    is_auto_check_updates_startup
+    is_auto_check_updates_startup,
+    is_always_on_top,
+    is_minimize_to_tray_on_close,
+    get_window_geometry,
+    set_window_geometry
 )
 from recorder.audio.devices import (
     get_working_input_devices,
@@ -106,13 +110,6 @@ class SilenceToastBanner(QWidget):
 
         card = QFrame(self)
         card.setObjectName("ToastCard")
-        card.setStyleSheet("""
-            #ToastCard {
-                background-color: #1e1e2f;
-                border: 1px solid #3b82f6;
-                border-radius: 10px;
-            }
-        """)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -133,30 +130,15 @@ class SilenceToastBanner(QWidget):
             lbl_app_logo.setPixmap(pix)
             app_header.addWidget(lbl_app_logo)
         lbl_app_name = QLabel("Inteligentny Dyktafon AI")
+        lbl_app_name.setObjectName("ToastAppName")
         lbl_app_name.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-        lbl_app_name.setStyleSheet("color: #8d99ae;")
         app_header.addWidget(lbl_app_name, stretch=1)
 
         btn_close = QPushButton("✕")
+        btn_close.setObjectName("ToastCloseBtn")
         btn_close.setFixedSize(22, 22)
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_close.setToolTip("Zamknij powiadomienie")
-        btn_close.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #94a3b8;
-                border: none;
-                padding: 0px;
-                margin: 0px;
-                font-size: 13px;
-                font-weight: bold;
-                border-radius: 11px;
-            }
-            QPushButton:hover {
-                color: #ffffff;
-                background-color: #ef4444;
-            }
-        """)
         btn_close.clicked.connect(self._on_close_clicked)
         app_header.addWidget(btn_close)
         layout.addLayout(app_header)
@@ -177,8 +159,8 @@ class SilenceToastBanner(QWidget):
         text_layout.setSpacing(2)
 
         lbl_title = QLabel(f"Brak dźwięku od {mins_str}")
+        lbl_title.setObjectName("ToastTitle")
         lbl_title.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        lbl_title.setStyleSheet("color: #f59e0b;")
         text_layout.addWidget(lbl_title)
 
         if source_mode == RecordSourceMode.SYSTEM_ONLY:
@@ -189,9 +171,9 @@ class SilenceToastBanner(QWidget):
             desc_text = "Brak mowy w mikrofonie oraz dźwięku z systemu."
 
         lbl_desc = QLabel(desc_text)
+        lbl_desc.setObjectName("ToastDesc")
         lbl_desc.setWordWrap(True)
         lbl_desc.setFont(QFont("Segoe UI", 8))
-        lbl_desc.setStyleSheet("color: #cbd5e1;")
         text_layout.addWidget(lbl_desc)
 
         content_row.addLayout(text_layout, stretch=1)
@@ -202,46 +184,23 @@ class SilenceToastBanner(QWidget):
         action_row.setSpacing(8)
 
         self.lbl_timer = QLabel(f"Zniknie za {self.remaining_sec}s")
+        self.lbl_timer.setObjectName("ToastTimer")
         self.lbl_timer.setFont(QFont("Segoe UI", 8))
-        self.lbl_timer.setStyleSheet("color: #64748b;")
         action_row.addWidget(self.lbl_timer, stretch=1)
 
         self.btn_ok = QPushButton("Wszystko gra")
+        self.btn_ok.setObjectName("ToastOkBtn")
         self.btn_ok.setFont(QFont("Segoe UI", 8, QFont.Weight.Medium))
         self.btn_ok.setFixedHeight(26)
         self.btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_ok.setStyleSheet("""
-            QPushButton {
-                background-color: #252836;
-                color: #e2e8f0;
-                border: 1px solid #3a3f55;
-                border-radius: 4px;
-                padding: 3px 10px;
-            }
-            QPushButton:hover {
-                background-color: #353a4e;
-                color: #ffffff;
-            }
-        """)
         self.btn_ok.clicked.connect(self._on_ok_clicked)
         action_row.addWidget(self.btn_ok)
 
         self.btn_err = QPushButton("Sprawdź dźwięk")
+        self.btn_err.setObjectName("ToastActionBtn")
         self.btn_err.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         self.btn_err.setFixedHeight(26)
         self.btn_err.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_err.setStyleSheet("""
-            QPushButton {
-                background-color: #4361ee;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 3px 10px;
-            }
-            QPushButton:hover {
-                background-color: #3a0ca3;
-            }
-        """)
         self.btn_err.clicked.connect(self._on_err_clicked)
         action_row.addWidget(self.btn_err)
 
@@ -303,6 +262,14 @@ class SmartDictaphoneWindow(QMainWindow):
             self.setWindowIcon(QIcon(ico))
         self.resize(780, 950)
         self.setMinimumSize(620, 720)
+        self._force_quit = False
+        self._last_tray_message_type: Optional[str] = None
+        self._last_silence_source_mode: Optional[str] = None
+
+        # Przywrócenie geometrii okna oraz flagi Always on Top
+        self._restore_window_geometry()
+        if is_always_on_top():
+            self.set_always_on_top(True)
 
         self.recordings_dir = RECORDINGS_DIR
         self.transcriptions_dir = TRANSCRIPTIONS_DIR
@@ -374,6 +341,60 @@ class SmartDictaphoneWindow(QMainWindow):
         if is_auto_check_updates_startup():
             QTimer.singleShot(3500, self._start_silent_update_check)
 
+    def set_always_on_top(self, enabled: bool) -> None:
+        """
+        Włącza lub wyłącza flagę WindowStaysOnTopHint z zachowaniem widoczności okna.
+        """
+        was_visible = self.isVisible()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, bool(enabled))
+        if was_visible:
+            self.show()
+        if sys.platform == "win32":
+            try:
+                from recorder.ui.theme import set_window_titlebar_theme
+                from recorder.config import get_theme
+                th = get_theme()
+                set_window_titlebar_theme(self, "dark" in th.lower())
+            except Exception:
+                pass
+
+    def _restore_window_geometry(self) -> None:
+        """
+        Przywraca zapisaną geometrię okna z user_settings.json z bezpiecznym fallbackiem.
+        """
+        try:
+            geom_hex = get_window_geometry()
+            if not geom_hex:
+                return
+            ba = QByteArray.fromHex(geom_hex.encode("ascii"))
+            if ba.isEmpty():
+                return
+
+            saved_w, saved_h = 0, 0
+            try:
+                ds = QDataStream(ba)
+                magic = ds.readUInt32()
+                if magic == 0x1D9D0CB:
+                    _major = ds.readUInt16()
+                    _minor = ds.readUInt16()
+                    # Pomijamy frame rect (4x int32)
+                    for _ in range(4):
+                        ds.readInt32()
+                    l2 = ds.readInt32()
+                    t2 = ds.readInt32()
+                    r2 = ds.readInt32()
+                    b2 = ds.readInt32()
+                    saved_w = r2 - l2 + 1
+                    saved_h = b2 - t2 + 1
+            except Exception:
+                saved_w, saved_h = 0, 0
+
+            restored = self.restoreGeometry(ba)
+            if restored and saved_w >= 600 and saved_h >= 600:
+                self.resize(max(self.width(), saved_w), max(self.height(), saved_h))
+        except Exception as e:
+            import logging
+            logging.getLogger("recorder").warning(f"Błąd przywracania geometrii okna: {e}")
 
     def _init_ui(self):
         scroll_area = QScrollArea()
@@ -399,8 +420,8 @@ class SmartDictaphoneWindow(QMainWindow):
         title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         
         subtitle = QLabel("Detekcja Mowy (Silero VAD AI) & Faster-Whisper")
+        subtitle.setObjectName("HeaderSubtitle")
         subtitle.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
-        subtitle.setStyleSheet("color: #4cc9f0;")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         header_text_layout.addWidget(title)
@@ -408,23 +429,8 @@ class SmartDictaphoneWindow(QMainWindow):
         header_container.addLayout(header_text_layout, stretch=1)
 
         self.btn_settings = QPushButton("⚙️ Ustawienia")
+        self.btn_settings.setObjectName("BtnSettings")
         self.btn_settings.setToolTip("Otwórz słownik branżowy, parametry AI, VAD i chmury")
-        self.btn_settings.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #4cc9f0;
-                border: 1px solid #3d405b;
-                border-radius: 8px;
-                padding: 10px 18px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-                color: #edf2f4;
-                border-color: #4cc9f0;
-            }
-        """)
         self.btn_settings.clicked.connect(self._open_settings_dialog)
         header_container.addWidget(self.btn_settings)
 
@@ -432,54 +438,23 @@ class SmartDictaphoneWindow(QMainWindow):
 
         # BANER AKTUALIZACJI (Domyślnie ukryty, pojawia się po cichym wykryciu aktualizacji w tle)
         self.banner_update = QFrame()
-        self.banner_update.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a2238, stop:1 #283048);
-                border: 1px solid #4361ee;
-                border-radius: 8px;
-            }
-        """)
+        self.banner_update.setObjectName("UpdateBanner")
         banner_layout = QHBoxLayout(self.banner_update)
         banner_layout.setContentsMargins(12, 8, 12, 8)
         banner_layout.setSpacing(10)
 
         self.lbl_update_banner_text = QLabel("🚀 Dostępna jest nowa wersja dyktafonu!")
-        self.lbl_update_banner_text.setStyleSheet("color: #4cc9f0; font-size: 12px; font-weight: bold; border: none; background: transparent;")
+        self.lbl_update_banner_text.setObjectName("UpdateBannerText")
         banner_layout.addWidget(self.lbl_update_banner_text, stretch=1)
 
         self.btn_update_banner_action = QPushButton("Pokaż aktualizację")
-        self.btn_update_banner_action.setStyleSheet("""
-            QPushButton {
-                background-color: #4361ee;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 14px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #3a0ca3;
-            }
-        """)
+        self.btn_update_banner_action.setObjectName("UpdateBannerActionBtn")
         self.btn_update_banner_action.clicked.connect(lambda: self._open_settings_dialog(initial_tab="updates"))
         banner_layout.addWidget(self.btn_update_banner_action)
 
         btn_close_banner = QPushButton("✕")
+        btn_close_banner.setObjectName("BannerCloseBtn")
         btn_close_banner.setToolTip("Ukryj powiadomienie")
-        btn_close_banner.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #8d99ae;
-                border: none;
-                font-size: 13px;
-                font-weight: bold;
-                padding: 4px 8px;
-            }
-            QPushButton:hover {
-                color: #edf2f4;
-            }
-        """)
         btn_close_banner.clicked.connect(self.banner_update.hide)
         banner_layout.addWidget(btn_close_banner)
 
@@ -494,8 +469,9 @@ class SmartDictaphoneWindow(QMainWindow):
         # 1. Wybór Trybu Źródła
         mode_row = QHBoxLayout()
         lbl_mode = QLabel("Tryb:")
+        lbl_mode.setObjectName("AudioSourceModeLabel")
         lbl_mode.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        lbl_mode.setStyleSheet("color: #4cc9f0; min-width: 120px;")
+        lbl_mode.setMinimumWidth(120)
         
         self.combo_source_mode = QComboBox()
         self.combo_source_mode.addItem("🎙️+🎧 Mikrofon + Dźwięk Systemu", RecordSourceMode.HYBRID_DUAL)
@@ -515,8 +491,9 @@ class SmartDictaphoneWindow(QMainWindow):
         # 2. Wybór Mikrofonu
         mic_row = QHBoxLayout()
         self.lbl_mic_input = QLabel("🎙️ Mikrofon:")
+        self.lbl_mic_input.setObjectName("LblMicInput")
         self.lbl_mic_input.setFont(QFont("Segoe UI", 9))
-        self.lbl_mic_input.setStyleSheet("min-width: 120px;")
+        self.lbl_mic_input.setMinimumWidth(120)
         self.combo_devices = QComboBox()
         self.btn_refresh_dev = QPushButton("🔄")
         self.btn_refresh_dev.setFixedWidth(40)
@@ -530,8 +507,9 @@ class SmartDictaphoneWindow(QMainWindow):
         # 3. Wybór Wyjścia Loopback (Głośniki / Słuchawki)
         sys_row = QHBoxLayout()
         self.lbl_sys_input = QLabel("🎧 Dźwięk Systemu:")
+        self.lbl_sys_input.setObjectName("LblSysInput")
         self.lbl_sys_input.setFont(QFont("Segoe UI", 9))
-        self.lbl_sys_input.setStyleSheet("min-width: 120px;")
+        self.lbl_sys_input.setMinimumWidth(120)
         self.combo_loopback_devices = QComboBox()
         self.btn_refresh_loop = QPushButton("🔄")
         self.btn_refresh_loop.setFixedWidth(40)
@@ -545,8 +523,9 @@ class SmartDictaphoneWindow(QMainWindow):
         # 4. Wybór Konkretnej Aplikacji Audio (Discord, Firefox / YouTube, Teams itp.)
         app_row = QHBoxLayout()
         self.lbl_app_input = QLabel("🎯 Aplikacja audio:")
+        self.lbl_app_input.setObjectName("LblAppInput")
         self.lbl_app_input.setFont(QFont("Segoe UI", 9))
-        self.lbl_app_input.setStyleSheet("min-width: 120px;")
+        self.lbl_app_input.setMinimumWidth(120)
         self.combo_target_apps = QComboBox()
         self.combo_target_apps.currentIndexChanged.connect(self._on_target_app_changed)
         self.btn_refresh_apps = QPushButton("🔄")
@@ -588,12 +567,12 @@ class SmartDictaphoneWindow(QMainWindow):
         model_layout.addLayout(model_row)
 
         self.lbl_model_desc = QLabel(WHISPER_MODELS.get(DEFAULT_WHISPER_MODEL, {}).get("desc", ""))
-        self.lbl_model_desc.setStyleSheet("color: #8d99ae; font-size: 11px; margin-top: 2px;")
+        self.lbl_model_desc.setObjectName("ModelDescLabel")
         model_layout.addWidget(self.lbl_model_desc)
 
         hw_info = get_hardware_acceleration_info()
         self.lbl_hw_badge = QLabel(hw_info["badge_text"])
-        self.lbl_hw_badge.setStyleSheet("color: #10b981; font-weight: bold; font-size: 11px; margin-top: 4px;")
+        self.lbl_hw_badge.setObjectName("HwBadgeLabel")
         model_layout.addWidget(self.lbl_hw_badge)
 
         main_layout.addWidget(model_box)
@@ -611,18 +590,18 @@ class SmartDictaphoneWindow(QMainWindow):
         display_layout.addWidget(self.lbl_status_badge, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.lbl_timer = QLabel("00:00:00")
+        self.lbl_timer.setObjectName("TimerLabel")
         self.lbl_timer.setFont(QFont("Consolas", 36, QFont.Weight.Bold))
         self.lbl_timer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_timer.setMinimumHeight(50)
-        self.lbl_timer.setStyleSheet("color: #edf2f4; margin: 4px 0;")
         display_layout.addWidget(self.lbl_timer)
 
         silence_header_layout = QHBoxLayout()
         self.lbl_silence_title = QLabel("Brak mowy (Auto-Pauza przy 5.0 s):")
         self.lbl_silence_title.setFont(QFont("Segoe UI", 9))
         self.lbl_silence_val = QLabel("0.0 s / 5.0 s")
+        self.lbl_silence_val.setObjectName("SilenceValLabel")
         self.lbl_silence_val.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.lbl_silence_val.setStyleSheet("color: #f59e0b;")
 
         silence_header_layout.addWidget(self.lbl_silence_title)
         silence_header_layout.addStretch()
@@ -643,41 +622,20 @@ class SmartDictaphoneWindow(QMainWindow):
 
         mic_vu_row = QHBoxLayout()
         self.lbl_vu_mic_title = QLabel("🎙️ Mikrofon:")
+        self.lbl_vu_mic_title.setObjectName("VuMicTitle")
         self.lbl_vu_mic_title.setFont(QFont("Segoe UI", 8, QFont.Weight.Medium))
-        self.lbl_vu_mic_title.setStyleSheet("color: #4cc9f0; min-width: 120px;")
+        self.lbl_vu_mic_title.setMinimumWidth(120)
         self.progress_vu_mic = QProgressBar()
+        self.progress_vu_mic.setObjectName("VuMicProgress")
         self.progress_vu_mic.setRange(0, 100)
         self.progress_vu_mic.setValue(0)
         self.progress_vu_mic.setTextVisible(False)
         self.progress_vu_mic.setFixedHeight(8)
-        self.progress_vu_mic.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #2b2d42;
-                border-radius: 4px;
-                background-color: #181824;
-            }
-            QProgressBar::chunk {
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4cc9f0, stop:0.8 #4895ef, stop:1 #f72585);
-                border-radius: 3px;
-            }
-        """)
         self.btn_mute_mic = QPushButton("🔊")
+        self.btn_mute_mic.setObjectName("BtnMuteMic")
         self.btn_mute_mic.setFixedSize(36, 22)
         self.btn_mute_mic.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_mute_mic.setToolTip("Wycisz mikrofon")
-        self.btn_mute_mic.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #edf2f4;
-                border: 1px solid #4a4e69;
-                border-radius: 4px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-                border-color: #4cc9f0;
-            }
-        """)
         self.btn_mute_mic.clicked.connect(self._toggle_mic_mute)
 
         mic_vu_row.addWidget(self.lbl_vu_mic_title)
@@ -687,41 +645,20 @@ class SmartDictaphoneWindow(QMainWindow):
 
         sys_vu_row = QHBoxLayout()
         self.lbl_vu_sys_title = QLabel("🎧 Dźwięk Systemu:")
+        self.lbl_vu_sys_title.setObjectName("VuSysTitle")
         self.lbl_vu_sys_title.setFont(QFont("Segoe UI", 8, QFont.Weight.Medium))
-        self.lbl_vu_sys_title.setStyleSheet("color: #a370f7; min-width: 120px;")
+        self.lbl_vu_sys_title.setMinimumWidth(120)
         self.progress_vu_sys = QProgressBar()
+        self.progress_vu_sys.setObjectName("VuSysProgress")
         self.progress_vu_sys.setRange(0, 100)
         self.progress_vu_sys.setValue(0)
         self.progress_vu_sys.setTextVisible(False)
         self.progress_vu_sys.setFixedHeight(8)
-        self.progress_vu_sys.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #2b2d42;
-                border-radius: 4px;
-                background-color: #181824;
-            }
-            QProgressBar::chunk {
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #a370f7, stop:0.8 #7209b7, stop:1 #f72585);
-                border-radius: 3px;
-            }
-        """)
         self.btn_mute_sys = QPushButton("🔊")
+        self.btn_mute_sys.setObjectName("BtnMuteSys")
         self.btn_mute_sys.setFixedSize(36, 22)
         self.btn_mute_sys.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_mute_sys.setToolTip("Wycisz dźwięk systemu")
-        self.btn_mute_sys.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #edf2f4;
-                border: 1px solid #4a4e69;
-                border-radius: 4px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-                border-color: #a370f7;
-            }
-        """)
         self.btn_mute_sys.clicked.connect(self._toggle_sys_mute)
 
         sys_vu_row.addWidget(self.lbl_vu_sys_title)
@@ -733,8 +670,8 @@ class SmartDictaphoneWindow(QMainWindow):
         display_layout.addLayout(vu_grid)
 
         self.lbl_vad_detail = QLabel("VAD: Oczekiwanie na uruchomienie...")
+        self.lbl_vad_detail.setObjectName("VadDetail")
         self.lbl_vad_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_vad_detail.setStyleSheet("color: #8d99ae; font-size: 11px; margin-top: 4px;")
         display_layout.addWidget(self.lbl_vad_detail)
 
         main_layout.addWidget(display_frame)
@@ -745,8 +682,8 @@ class SmartDictaphoneWindow(QMainWindow):
 
         lbl_thresh = QLabel("Próg braku mowy:")
         self.lbl_thresh_val = QLabel("5.0 s")
+        self.lbl_thresh_val.setObjectName("ThreshValLabel")
         self.lbl_thresh_val.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.lbl_thresh_val.setStyleSheet("color: #4cc9f0;")
 
         self.slider_silence = QSlider(Qt.Orientation.Horizontal)
         self.slider_silence.setRange(1, 10)
@@ -785,9 +722,9 @@ class SmartDictaphoneWindow(QMainWindow):
         self.btn_stop.clicked.connect(self._on_stop_clicked)
 
         self.btn_upload = QPushButton("📂 Prześlij Plik Audio")
+        self.btn_upload.setObjectName("BtnUploadAudio")
         self.btn_upload.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         self.btn_upload.setMinimumHeight(48)
-        self.btn_upload.setStyleSheet("background-color: #3a0ca3; color: #ffffff; border-radius: 8px; padding: 0 14px;")
         self.btn_upload.setToolTip("Wgraj gotowy plik audio (WAV, MP3, M4A, FLAC, OGG, AAC, MP4, MKV) do transkrypcji i diaryzacji")
         self.btn_upload.clicked.connect(self._on_upload_file_clicked)
 
@@ -809,7 +746,7 @@ class SmartDictaphoneWindow(QMainWindow):
         self.check_enable_diarization.toggled.connect(self._on_diarization_toggled)
 
         lbl_speakers = QLabel("Liczba osób:")
-        lbl_speakers.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        lbl_speakers.setObjectName("SpeakerCountLabel")
         self.combo_speakers = QComboBox()
         for label, count_val in SPEAKER_COUNT_OPTIONS:
             self.combo_speakers.addItem(label, userData=count_val)
@@ -851,7 +788,7 @@ class SmartDictaphoneWindow(QMainWindow):
         left_layout = QVBoxLayout(left_box)
 
         self.lbl_path_audio = QLabel(f"Folder: {self.recordings_dir}")
-        self.lbl_path_audio.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        self.lbl_path_audio.setObjectName("AudioPathLabel")
         left_layout.addWidget(self.lbl_path_audio)
 
         self.list_recordings = QListWidget()
@@ -870,7 +807,7 @@ class SmartDictaphoneWindow(QMainWindow):
         right_layout = QVBoxLayout(right_box)
 
         self.lbl_path_txt = QLabel(f"Folder: {self.transcriptions_dir}")
-        self.lbl_path_txt.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        self.lbl_path_txt.setObjectName("TxtPathLabel")
         right_layout.addWidget(self.lbl_path_txt)
 
         self.list_transcriptions = QListWidget()
@@ -886,8 +823,8 @@ class SmartDictaphoneWindow(QMainWindow):
         btn_open_txt_folder.clicked.connect(self._on_open_txt_folder_clicked)
 
         self.btn_run_diarization = QPushButton("👥 Rozpoznaj Mówców (PyAnnote)")
+        self.btn_run_diarization.setObjectName("BtnRunDiarization")
         self.btn_run_diarization.setFixedHeight(32)
-        self.btn_run_diarization.setStyleSheet("background-color: #7209b7; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 0 10px;")
         self.btn_run_diarization.setToolTip("Uruchamia analizę mówców PyAnnote w tle dla zaznaczonego nagrania bez ponownej transkrypcji Whispera")
         self.btn_run_diarization.clicked.connect(self._on_run_diarization_clicked)
 
@@ -901,25 +838,25 @@ class SmartDictaphoneWindow(QMainWindow):
 
         # PANEL MAPOWANIA I WERYFIKACJI MÓWCÓW
         self.speaker_box = QGroupBox("👥 Przypisanie i Korekta Mówców (Weryfikacja)")
-        self.speaker_box.setStyleSheet("QGroupBox { border: 1px solid #4361ee; margin-top: 10px; font-weight: bold; }")
+        self.speaker_box.setObjectName("SpeakerBox")
         speaker_main_layout = QVBoxLayout(self.speaker_box)
         speaker_main_layout.setContentsMargins(12, 14, 12, 12)
         speaker_main_layout.setSpacing(10)
 
         lbl_spk_info = QLabel("🤖 Program przeanalizował dialogi i zasugerował imiona. Zweryfikuj je lub popraw przed zapisem:")
-        lbl_spk_info.setStyleSheet("color: #4cc9f0; font-size: 11px;")
+        lbl_spk_info.setObjectName("SpeakerInfoLabel")
         speaker_main_layout.addWidget(lbl_spk_info)
 
         # Przewijalny obszar dla mówców (zapewnia doskonałą widoczność dla 3-6 osób jednocześnie)
         speaker_scroll = QScrollArea()
+        speaker_scroll.setObjectName("SpeakerScrollArea")
         speaker_scroll.setWidgetResizable(True)
         speaker_scroll.setFrameShape(QFrame.Shape.NoFrame)
         speaker_scroll.setMinimumHeight(160)
         speaker_scroll.setMaximumHeight(320)
-        speaker_scroll.setStyleSheet("background: transparent;")
 
         speaker_scroll_widget = QWidget()
-        speaker_scroll_widget.setStyleSheet("background: transparent;")
+        speaker_scroll_widget.setObjectName("SpeakerScrollWidget")
         self.speaker_rows_layout = QVBoxLayout(speaker_scroll_widget)
         self.speaker_rows_layout.setContentsMargins(0, 0, 0, 0)
         self.speaker_rows_layout.setSpacing(8)
@@ -928,8 +865,8 @@ class SmartDictaphoneWindow(QMainWindow):
         speaker_main_layout.addWidget(speaker_scroll)
 
         self.btn_apply_speakers = QPushButton("✅ Zastosuj Imiona Mówców i Zapisz Zmiany")
+        self.btn_apply_speakers.setObjectName("BtnApplySpeakers")
         self.btn_apply_speakers.setFixedHeight(36)
-        self.btn_apply_speakers.setStyleSheet("background-color: #2b9348; color: #ffffff; font-weight: bold; border-radius: 6px;")
         self.btn_apply_speakers.clicked.connect(self._on_apply_speakers_clicked)
         speaker_main_layout.addWidget(self.btn_apply_speakers)
 
@@ -948,20 +885,14 @@ class SmartDictaphoneWindow(QMainWindow):
         transcript_actions_layout.setSpacing(8)
 
         self.btn_copy_transcript = QPushButton("📋 Kopiuj transkrypcję")
+        self.btn_copy_transcript.setObjectName("BtnCopyTranscript")
         self.btn_copy_transcript.setFixedHeight(32)
-        self.btn_copy_transcript.setStyleSheet(
-            "background-color: #2b2d42; color: #4cc9f0; border: 1px solid #3d405b; "
-            "border-radius: 6px; font-weight: bold; padding: 0 14px;"
-        )
         self.btn_copy_transcript.setToolTip("Kopiuj całą transkrypcję do schowka")
         self.btn_copy_transcript.clicked.connect(self._on_copy_transcript_clicked)
 
         self.btn_save_transcript = QPushButton("💾 Pobierz .txt")
+        self.btn_save_transcript.setObjectName("BtnSaveTranscript")
         self.btn_save_transcript.setFixedHeight(32)
-        self.btn_save_transcript.setStyleSheet(
-            "background-color: #2b2d42; color: #10b981; border: 1px solid #3d405b; "
-            "border-radius: 6px; font-weight: bold; padding: 0 14px;"
-        )
         self.btn_save_transcript.setToolTip("Zapisz transkrypcję jako plik .txt w wybranej lokalizacji")
         self.btn_save_transcript.clicked.connect(self._on_save_transcript_clicked)
 
@@ -977,11 +908,12 @@ class SmartDictaphoneWindow(QMainWindow):
 
         sync_target_name = self.cloud_sync.config.get("sync_target", "emanager").upper()
         self.lbl_cloud_status = QLabel(f"☁️ Integracja: {sync_target_name} (Gotowa)")
-        self.lbl_cloud_status.setStyleSheet("color: #4cc9f0; font-size: 11px; font-weight: bold;")
+        self.lbl_cloud_status.setObjectName("CloudStatus")
+        self.lbl_cloud_status.setProperty("status", "info")
 
         self.btn_manual_sync = QPushButton(f"☁️ Wyślij do {sync_target_name}")
+        self.btn_manual_sync.setObjectName("BtnManualSync")
         self.btn_manual_sync.setFixedHeight(30)
-        self.btn_manual_sync.setStyleSheet("background-color: #4361ee; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 0 12px;")
         self.btn_manual_sync.setEnabled(False)
         self.btn_manual_sync.clicked.connect(self._on_manual_sync_clicked)
 
@@ -1019,6 +951,9 @@ class SmartDictaphoneWindow(QMainWindow):
 
             # 4. Natychmiastowe odświeżenie widoku podglądu transkrypcji (kolejność / format)
             self._refresh_current_transcript_view()
+
+            # 5. Aktualizacja flagi Always on Top
+            self.set_always_on_top(is_always_on_top())
 
             QMessageBox.information(
                 self,
@@ -1157,12 +1092,47 @@ class SmartDictaphoneWindow(QMainWindow):
             QMessageBox.critical(self, "Błąd zapisu", f"Nie udało się zapisać pliku:\n{e}")
 
     def _apply_theme(self):
+        """Deleguje aplikację stylów do scentralizowanego silnika theme.py."""
+        from recorder.ui.theme import apply_theme
+        from recorder.config import get_theme, get_font_size
+        apply_theme(
+            app=QApplication.instance(),
+            theme_id=get_theme(),
+            font_size=get_font_size(),
+            window=self
+        )
 
-        app = QApplication.instance()
-        if app:
-            setup_dark_palette(app)
-            app.setStyleSheet(DARK_THEME_QSS)
-        self.setStyleSheet(DARK_THEME_QSS)
+    def _set_cloud_status(self, text: str, status: str = "info") -> None:
+        """Aktualizuje tekst oraz stan wizualny etykiety synchronizacji chmurowej."""
+        self.lbl_cloud_status.setText(text)
+        self.lbl_cloud_status.setProperty("status", status)
+        self.lbl_cloud_status.style().unpolish(self.lbl_cloud_status)
+        self.lbl_cloud_status.style().polish(self.lbl_cloud_status)
+
+    def _update_source_mode_labels(self, mic_active: bool, sys_active: bool, app_active: bool) -> None:
+        """Aktualizuje podświetlenie aktywnych źródeł dźwięku."""
+        for lbl, active in (
+            (self.lbl_mic_input, mic_active),
+            (self.lbl_sys_input, sys_active),
+            (self.lbl_app_input, app_active),
+        ):
+            lbl.setProperty("active", "true" if active else "false")
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
+
+    def _update_mute_btn_state(self, btn: QPushButton, is_muted: bool) -> None:
+        """Aktualizuje stan przycisku wyciszenia."""
+        btn.setProperty("muted", "true" if is_muted else "false")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+
+    def _set_vad_state(self, vad_state: str) -> None:
+        """Aktualizuje stan wizualny etykiety VAD z ochroną przed nadmiernym odświeżaniem QSS."""
+        if getattr(self, "_last_vad_state", None) != vad_state:
+            self._last_vad_state = vad_state
+            self.lbl_vad_detail.setProperty("vad_state", vad_state)
+            self.lbl_vad_detail.style().unpolish(self.lbl_vad_detail)
+            self.lbl_vad_detail.style().polish(self.lbl_vad_detail)
 
     def _refresh_microphones(self):
         """Odświeża wyłącznie listę mikrofonów wejściowych."""
@@ -1235,8 +1205,7 @@ class SmartDictaphoneWindow(QMainWindow):
         if hasattr(self, "worker") and self.worker is not None and self.worker.state != SmartRecordState.STOPPED:
             self.worker.update_target_app_filter(new_filter)
             app_text = self.combo_target_apps.currentText()
-            self.lbl_cloud_status.setText(f"🎯 Przełączono nasłuch w locie: {app_text}")
-            self.lbl_cloud_status.setStyleSheet("color: #a370f7; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status(f"🎯 Przełączono nasłuch w locie: {app_text}", "purple")
 
     def _refresh_audio_devices(self):
         """Pełne odświeżenie wszystkich źródeł dźwięku."""
@@ -1257,9 +1226,7 @@ class SmartDictaphoneWindow(QMainWindow):
             self.btn_refresh_loop.setEnabled(False)
             self.combo_target_apps.setEnabled(False)
             self.btn_refresh_apps.setEnabled(False)
-            self.lbl_mic_input.setStyleSheet("color: #4cc9f0; min-width: 120px; font-weight: bold;")
-            self.lbl_sys_input.setStyleSheet("color: #8d99ae; min-width: 120px;")
-            self.lbl_app_input.setStyleSheet("color: #8d99ae; min-width: 120px;")
+            self._update_source_mode_labels(True, False, False)
             self.lbl_vu_mic_title.setVisible(True)
             self.progress_vu_mic.setVisible(True)
             self.btn_mute_mic.setVisible(True)
@@ -1273,9 +1240,7 @@ class SmartDictaphoneWindow(QMainWindow):
             self.btn_refresh_loop.setEnabled(not is_recording)
             self.combo_target_apps.setEnabled(True)
             self.btn_refresh_apps.setEnabled(True)
-            self.lbl_mic_input.setStyleSheet("color: #8d99ae; min-width: 120px;")
-            self.lbl_sys_input.setStyleSheet("color: #a370f7; min-width: 120px; font-weight: bold;")
-            self.lbl_app_input.setStyleSheet("color: #a370f7; min-width: 120px; font-weight: bold;")
+            self._update_source_mode_labels(False, True, True)
             self.lbl_vu_mic_title.setVisible(False)
             self.progress_vu_mic.setVisible(False)
             self.btn_mute_mic.setVisible(False)
@@ -1289,9 +1254,7 @@ class SmartDictaphoneWindow(QMainWindow):
             self.btn_refresh_loop.setEnabled(not is_recording)
             self.combo_target_apps.setEnabled(True)
             self.btn_refresh_apps.setEnabled(True)
-            self.lbl_mic_input.setStyleSheet("color: #4cc9f0; min-width: 120px; font-weight: bold;")
-            self.lbl_sys_input.setStyleSheet("color: #a370f7; min-width: 120px; font-weight: bold;")
-            self.lbl_app_input.setStyleSheet("color: #a370f7; min-width: 120px; font-weight: bold;")
+            self._update_source_mode_labels(True, True, True)
             self.lbl_vu_mic_title.setVisible(True)
             self.progress_vu_mic.setVisible(True)
             self.btn_mute_mic.setVisible(True)
@@ -1316,46 +1279,20 @@ class SmartDictaphoneWindow(QMainWindow):
         if new_state:
             self.btn_mute_mic.setText("🔇")
             self.btn_mute_mic.setToolTip("Włącz mikrofon")
-            self.btn_mute_mic.setStyleSheet("""
-                QPushButton {
-                    background-color: #ef4444;
-                    color: #ffffff;
-                    border: 1px solid #dc2626;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #dc2626;
-                }
-            """)
+            self._update_mute_btn_state(self.btn_mute_mic, True)
             self.lbl_vu_mic_title.setText("🎙️ Mikrofon (Wyciszony):")
             self.progress_vu_mic.setValue(0)
             if hasattr(self, "worker") and self.worker is not None:
                 self.worker.set_mic_muted(True)
-            self.lbl_cloud_status.setText("🔇 Wyciszono mikrofon.")
-            self.lbl_cloud_status.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status("🔇 Wyciszono mikrofon.", "error")
         else:
             self.btn_mute_mic.setText("🔊")
             self.btn_mute_mic.setToolTip("Wycisz mikrofon")
-            self.btn_mute_mic.setStyleSheet("""
-                QPushButton {
-                    background-color: #2b2d42;
-                    color: #edf2f4;
-                    border: 1px solid #4a4e69;
-                    border-radius: 4px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #3d405b;
-                    border-color: #4cc9f0;
-                }
-            """)
+            self._update_mute_btn_state(self.btn_mute_mic, False)
             self.lbl_vu_mic_title.setText("🎙️ Mikrofon:")
             if hasattr(self, "worker") and self.worker is not None:
                 self.worker.set_mic_muted(False)
-            self.lbl_cloud_status.setText("🎙️ Włączono mikrofon.")
-            self.lbl_cloud_status.setStyleSheet("color: #4cc9f0; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status("🎙️ Włączono mikrofon.", "info")
 
     def _toggle_sys_mute(self):
         """Wycisza lub przywraca nasłuch dźwięku systemu w locie."""
@@ -1364,46 +1301,20 @@ class SmartDictaphoneWindow(QMainWindow):
         if new_state:
             self.btn_mute_sys.setText("🔇")
             self.btn_mute_sys.setToolTip("Włącz dźwięk systemu")
-            self.btn_mute_sys.setStyleSheet("""
-                QPushButton {
-                    background-color: #ef4444;
-                    color: #ffffff;
-                    border: 1px solid #dc2626;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #dc2626;
-                }
-            """)
+            self._update_mute_btn_state(self.btn_mute_sys, True)
             self.lbl_vu_sys_title.setText("🎧 Dźwięk Systemu (Wyciszony):")
             self.progress_vu_sys.setValue(0)
             if hasattr(self, "worker") and self.worker is not None:
                 self.worker.set_sys_muted(True)
-            self.lbl_cloud_status.setText("🔇 Wyciszono dźwięk systemu.")
-            self.lbl_cloud_status.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status("🔇 Wyciszono dźwięk systemu.", "error")
         else:
             self.btn_mute_sys.setText("🔊")
             self.btn_mute_sys.setToolTip("Wycisz dźwięk systemu")
-            self.btn_mute_sys.setStyleSheet("""
-                QPushButton {
-                    background-color: #2b2d42;
-                    color: #edf2f4;
-                    border: 1px solid #4a4e69;
-                    border-radius: 4px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #3d405b;
-                    border-color: #a370f7;
-                }
-            """)
+            self._update_mute_btn_state(self.btn_mute_sys, False)
             self.lbl_vu_sys_title.setText("🎧 Dźwięk Systemu:")
             if hasattr(self, "worker") and self.worker is not None:
                 self.worker.set_sys_muted(False)
-            self.lbl_cloud_status.setText("🎧 Włączono dźwięk systemu.")
-            self.lbl_cloud_status.setStyleSheet("color: #a370f7; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status("🎧 Włączono dźwięk systemu.", "purple")
 
     def _update_dual_audio_level(self, mic_lvl: float, sys_lvl: float):
         """Aktualizacja podwójnego wskaźnika poziomu głośności VU meter w UI."""
@@ -1519,8 +1430,7 @@ class SmartDictaphoneWindow(QMainWindow):
                 title=f"Spotkanie biurowe {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             )
             target_name = self.cloud_sync.config.get("sync_target", "CRM").upper()
-            self.lbl_cloud_status.setText(f"🟢 Transmisja na żywo do {target_name} aktywna...")
-            self.lbl_cloud_status.setStyleSheet("color: #4cc9f0; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status(f"🟢 Transmisja na żywo do {target_name} aktywna...", "info")
 
         # Ustawienie estetycznego komunikatu oczekiwania na pierwszy zweryfikowany blok mowy
         self.text_transcript.setHtml(
@@ -2121,7 +2031,7 @@ class SmartDictaphoneWindow(QMainWindow):
             stats_text = format_speaker_stats(spk_count, spk_dur)
 
             card_frame = QFrame()
-            card_frame.setStyleSheet("background-color: #1a1a2e; border: 1px solid #3d3d5c; border-radius: 8px; padding: 6px;")
+            card_frame.setObjectName("SpeakerCard")
             card_layout = QVBoxLayout(card_frame)
             card_layout.setContentsMargins(10, 8, 10, 8)
             card_layout.setSpacing(6)
@@ -2129,10 +2039,10 @@ class SmartDictaphoneWindow(QMainWindow):
             # Nagłówek karty: ID Mówcy + Licznik wypowiedzi i łączny czas mowy
             header_row = QHBoxLayout()
             lbl_spk = QLabel(f"🏷️ <b>{spk_id}</b>")
-            lbl_spk.setStyleSheet("color: #edf2f4; font-size: 12px; font-weight: bold;")
+            lbl_spk.setObjectName("SpeakerIdLabel")
 
             lbl_stats = QLabel(f"📊 {stats_text}")
-            lbl_stats.setStyleSheet("color: #10b981; font-size: 11px; font-weight: bold;")
+            lbl_stats.setObjectName("SpeakerStatsLabel")
             lbl_stats.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
             header_row.addWidget(lbl_spk)
@@ -2145,13 +2055,13 @@ class SmartDictaphoneWindow(QMainWindow):
             input_row.setSpacing(8)
 
             edit_name = QLineEdit()
+            edit_name.setObjectName("SpeakerNameEdit")
             edit_name.setPlaceholderText("Imię / Nazwisko (np. Ania, Bartek)...")
             edit_name.setText(suggested_name if suggested_name != spk_id else "")
-            edit_name.setStyleSheet("background-color: #2b2d42; color: #edf2f4; border: 1px solid #4cc9f0; border-radius: 4px; padding: 5px 8px; font-weight: bold; font-size: 12px;")
 
             edit_role = QLineEdit()
+            edit_role.setObjectName("SpeakerRoleEdit")
             edit_role.setPlaceholderText("Rola / Dział (np. Kierownik, Sprzedaż, IT)...")
-            edit_role.setStyleSheet("background-color: #2b2d42; color: #f59e0b; border: 1px solid #f59e0b; border-radius: 4px; padding: 5px 8px; font-size: 11px;")
 
             self.speaker_inputs[spk_id] = {
                 "name": edit_name,
@@ -2167,11 +2077,11 @@ class SmartDictaphoneWindow(QMainWindow):
             bottom_row.setSpacing(10)
 
             lbl_clue = QLabel(f"💡 {clue}")
-            lbl_clue.setStyleSheet("color: #4cc9f0; font-size: 11px;")
+            lbl_clue.setObjectName("SpeakerClueLabel")
             lbl_clue.setWordWrap(True)
 
             lbl_sample = QLabel(f"Próbka: <i>„{sample_text}”</i>" if sample_text else "")
-            lbl_sample.setStyleSheet("color: #8d99ae; font-size: 11px;")
+            lbl_sample.setObjectName("SpeakerSampleLabel")
             lbl_sample.setWordWrap(True)
 
             bottom_row.addWidget(lbl_clue, stretch=2)
@@ -2337,43 +2247,35 @@ class SmartDictaphoneWindow(QMainWindow):
 
     def _on_sync_started(self, meeting_id: str):
         target_name = self.cloud_sync.config.get("sync_target", "emanager").upper()
-        self.lbl_cloud_status.setText(f"☁️ Synchronizacja z {target_name} w toku...")
-        self.lbl_cloud_status.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold;")
+        self._set_cloud_status(f"☁️ Synchronizacja z {target_name} w toku...", "warning")
         self.btn_manual_sync.setEnabled(False)
 
     def _on_sync_finished(self, meeting_id: str, success: bool, message: str):
         target_name = self.cloud_sync.config.get("sync_target", "emanager").upper()
         self.btn_manual_sync.setEnabled(True)
         if success:
-            self.lbl_cloud_status.setText(f"☁️ Zsynchronizowano z {target_name} ✅")
-            self.lbl_cloud_status.setStyleSheet("color: #10b981; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status(f"☁️ Zsynchronizowano z {target_name} ✅", "success")
         else:
-            self.lbl_cloud_status.setText(f"☁️ Zapisano lokalnie (kolejka offline)")
-            self.lbl_cloud_status.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status("☁️ Zapisano lokalnie (kolejka offline)", "warning")
 
     def _on_offline_queued(self, meeting_id: str, message: str):
-        self.lbl_cloud_status.setText(f"☁️ Zapisano w kolejce offline ⏳")
-        self.lbl_cloud_status.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold;")
+        self._set_cloud_status("☁️ Zapisano w kolejce offline ⏳", "warning")
         self.btn_manual_sync.setEnabled(True)
 
     def _on_live_session_started(self, meeting_id: str):
         target_name = self.cloud_sync.config.get("sync_target", "CRM").upper()
-        self.lbl_cloud_status.setText(f"🟢 Transmisja na żywo do {target_name} aktywna (ID: {meeting_id[:8]}...)")
-        self.lbl_cloud_status.setStyleSheet("color: #10b981; font-size: 11px; font-weight: bold;")
+        self._set_cloud_status(f"🟢 Transmisja na żywo do {target_name} aktywna (ID: {meeting_id[:8]}...)", "success")
 
     def _on_live_block_synced(self, meeting_id: str, count: int):
         target_name = self.cloud_sync.config.get("sync_target", "CRM").upper()
-        self.lbl_cloud_status.setText(f"🟢 Transmisja do {target_name}: +{count} wypowiedzi na żywo")
-        self.lbl_cloud_status.setStyleSheet("color: #10b981; font-size: 11px; font-weight: bold;")
+        self._set_cloud_status(f"🟢 Transmisja do {target_name}: +{count} wypowiedzi na żywo", "success")
 
     def _on_live_session_finalized(self, meeting_id: str, success: bool, msg: str):
         target_name = self.cloud_sync.config.get("sync_target", "CRM").upper()
         if success:
-            self.lbl_cloud_status.setText(f"☁️ Zakończono sesję w {target_name} ✅")
-            self.lbl_cloud_status.setStyleSheet("color: #10b981; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status(f"☁️ Zakończono sesję w {target_name} ✅", "success")
         else:
-            self.lbl_cloud_status.setText(f"☁️ Sesja zapisana lokalnie (kolejka offline)")
-            self.lbl_cloud_status.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold;")
+            self._set_cloud_status("☁️ Sesja zapisana lokalnie (kolejka offline)", "warning")
 
     def _on_session_split_triggered(self, reason: str):
         """
@@ -2438,8 +2340,7 @@ class SmartDictaphoneWindow(QMainWindow):
             )
 
         target_name = self.cloud_sync.config.get("sync_target", "CRM").upper()
-        self.lbl_cloud_status.setText(f"🟢 Nowa sesja spotkania w {target_name} ({reason})")
-        self.lbl_cloud_status.setStyleSheet("color: #10b981; font-size: 11px; font-weight: bold;")
+        self._set_cloud_status(f"🟢 Nowa sesja spotkania w {target_name} ({reason})", "success")
 
     def _refresh_transcriptions_list(self):
         """Odświeża listę transkrypcji TXT posortowaną chronologicznie (najnowsze na samej górze)."""
@@ -2691,8 +2592,7 @@ class SmartDictaphoneWindow(QMainWindow):
 
                 self.btn_manual_sync.setEnabled(True)
                 target_name = self.cloud_sync.config.get("sync_target", "emanager").upper()
-                self.lbl_cloud_status.setText(f"☁️ Wczytano plik: {os.path.basename(file_path)} (Gotowy do wysłania)")
-                self.lbl_cloud_status.setStyleSheet("color: #4cc9f0; font-size: 11px; font-weight: bold;")
+                self._set_cloud_status(f"☁️ Wczytano plik: {os.path.basename(file_path)} (Gotowy do wysłania)", "info")
             except Exception as e:
                 QMessageBox.warning(self, "Błąd Odczytu", f"Nie udało się otworzyć pliku:\n{e}")
 
@@ -2786,7 +2686,7 @@ class SmartDictaphoneWindow(QMainWindow):
         if self.worker.state == SmartRecordState.MANUAL_PAUSED:
             self.progress_silence.setValue(0)
             self.lbl_vad_detail.setText("⏸ Nagrywanie wstrzymane ręcznie (kliknij 'Wznów Nagrywanie', aby kontynuować)")
-            self.lbl_vad_detail.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 11px;")
+            self._set_vad_state("paused")
             return
 
         try:
@@ -2803,10 +2703,10 @@ class SmartDictaphoneWindow(QMainWindow):
         prob_pct = int(speech_prob * 100) if (speech_prob and speech_prob == speech_prob) else 0
         if is_speech:
             self.lbl_vad_detail.setText(f"🗣️ VAD: DETEKCJA MOWY ({prob_pct}% pewności AI, Tryb: {vad_mode_str})")
-            self.lbl_vad_detail.setStyleSheet("color: #10b981; font-weight: bold; font-size: 11px;")
+            self._set_vad_state("speech")
         else:
             self.lbl_vad_detail.setText(f"🔇 VAD: Cisza / Szum tła ({prob_pct}% pewności AI, Tryb: {vad_mode_str})")
-            self.lbl_vad_detail.setStyleSheet("color: #8d99ae; font-size: 11px;")
+            self._set_vad_state("silence")
 
     def _on_worker_state_changed(self, state):
         thresh_val = self.slider_silence.value()
@@ -2859,10 +2759,6 @@ class SmartDictaphoneWindow(QMainWindow):
 
     def _setup_tray_icon(self):
         """Inicjalizuje ikonę zasobnika systemowego Windows dla dyskretnych powiadomień."""
-        if not QSystemTrayIcon.isSystemTrayAvailable():
-            self.tray_icon = None
-            return
-
         try:
             self.tray_icon = QSystemTrayIcon(self)
             from recorder.ui.windows_integration import get_app_icon_path
@@ -2891,30 +2787,6 @@ class SmartDictaphoneWindow(QMainWindow):
 
             # Menu podręczne pod prawym przyciskiem myszy
             tray_menu = QMenu(self)
-            tray_menu.setStyleSheet("""
-                QMenu {
-                    background-color: #1e1e2f;
-                    color: #edf2f4;
-                    border: 1px solid #2b2d42;
-                    border-radius: 6px;
-                    padding: 4px;
-                    font-family: "Segoe UI", sans-serif;
-                    font-size: 12px;
-                }
-                QMenu::item {
-                    padding: 6px 18px;
-                    border-radius: 4px;
-                }
-                QMenu::item:selected {
-                    background-color: #4361ee;
-                    color: #ffffff;
-                }
-                QMenu::separator {
-                    height: 1px;
-                    background-color: #2b2d42;
-                    margin: 4px 6px;
-                }
-            """)
             act_restore = tray_menu.addAction("🎙️ Otwórz okno")
             act_restore.triggered.connect(self._restore_from_tray)
 
@@ -2923,13 +2795,19 @@ class SmartDictaphoneWindow(QMainWindow):
 
             tray_menu.addSeparator()
             act_quit = tray_menu.addAction("❌ Zakończ")
-            act_quit.triggered.connect(self.close)
+            act_quit.triggered.connect(self._on_tray_quit)
 
             self.tray_icon.setContextMenu(tray_menu)
-            self.tray_icon.show()
+            if QSystemTrayIcon.isSystemTrayAvailable():
+                self.tray_icon.show()
         except Exception as e:
             print(f"[Tray] Nie udało się zainicjalizować ikony zasobnika: {e}")
             self.tray_icon = None
+
+    def _on_tray_quit(self) -> None:
+        """Wymusza zamknięcie aplikacji z menu zasobnika systemowego."""
+        self._force_quit = True
+        self.close()
 
     def _on_tray_icon_activated(self, reason):
         """Obsługa kliknięcia ikony w zasobniku systemowym."""
@@ -2954,8 +2832,13 @@ class SmartDictaphoneWindow(QMainWindow):
                 self.tray_icon.setToolTip("Inteligentny Dyktafon AI")
 
     def _on_tray_message_clicked(self):
+        """Obsługuje kliknięcie w dymek powiadomienia (balloon) w zasobniku systemowym."""
         self._restore_from_tray()
-        self._show_audio_inspection_dialog(self.combo_source_mode.currentData() or RecordSourceMode.HYBRID_DUAL)
+        msg_type = getattr(self, "_last_tray_message_type", None)
+        self._last_tray_message_type = None
+        if msg_type == "silence_alert":
+            source_mode = getattr(self, "_last_silence_source_mode", None) or self.combo_source_mode.currentData() or RecordSourceMode.HYBRID_DUAL
+            self._show_audio_inspection_dialog(source_mode)
 
     def _show_audio_inspection_dialog(self, source_mode: str):
         # 1. Przywrócenie okna głównego, aby użytkownik widział wskaźniki VU i urządzenia
@@ -3005,8 +2888,7 @@ class SmartDictaphoneWindow(QMainWindow):
     def _handle_silence_confirmed(self, mins_str: str):
         if hasattr(self, "worker"):
             self.worker.reset_silence_alert()
-        self.lbl_cloud_status.setText("✅ Nagrywanie trwa (aktywność potwierdzona).")
-        self.lbl_cloud_status.setStyleSheet("color: #10b981; font-size: 11px; font-weight: bold;")
+        self._set_cloud_status("✅ Nagrywanie trwa (aktywność potwierdzona).", "success")
         self._update_tray_tooltip("Nagrywanie trwa")
 
     def _handle_silence_inspect_requested(self, source_mode: str):
@@ -3048,6 +2930,8 @@ class SmartDictaphoneWindow(QMainWindow):
             self.worker.reset_silence_alert()
         title = f"⚠️ Brak dźwięku od {mins_str}"
         msg = f"Dyktafon rejestruje czas, ale nie wykryto mowy ani dźwięku.\nKliknij tutaj, aby sprawdzić stan urządzeń."
+        self._last_tray_message_type = "silence_alert"
+        self._last_silence_source_mode = source_mode
         if getattr(self, "tray_icon", None) is not None:
             self._update_tray_tooltip(f"Brak dźwięku ({mins_str})")
             self.tray_icon.showMessage(
@@ -3056,8 +2940,7 @@ class SmartDictaphoneWindow(QMainWindow):
                 QSystemTrayIcon.MessageIcon.Warning,
                 15000
             )
-        self.lbl_cloud_status.setText(f"⚠️ Brak dźwięku od {mins_str}.")
-        self.lbl_cloud_status.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold;")
+        self._set_cloud_status(f"⚠️ Brak dźwięku od {mins_str}.", "warning")
 
     def _handle_audio_error(self, err_msg):
         self._on_stop_clicked()
@@ -3078,6 +2961,36 @@ class SmartDictaphoneWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(self.recordings_dir))
 
     def closeEvent(self, event):
+        # 1. Zapis geometrii okna (zawsze przed schowaniem lub zamknięciem)
+        try:
+            geom_hex = self.saveGeometry().toHex().data().decode("ascii")
+            set_window_geometry(geom_hex)
+        except Exception as e:
+            import logging
+            logging.getLogger("recorder").warning(f"Błąd zapisu geometrii okna: {e}")
+
+        # 2. Ochrona minimalizacji do zasobnika systemowego (Minimize to Tray on Close)
+        force_quit = getattr(self, "_force_quit", False) or getattr(self, "_force_close", False)
+        tray_available = QSystemTrayIcon.isSystemTrayAvailable() if hasattr(QSystemTrayIcon, "isSystemTrayAvailable") else False
+        tray_present = getattr(self, "tray_icon", None) is not None
+
+        if is_minimize_to_tray_on_close() and not force_quit and tray_available and tray_present:
+            event.ignore()
+            self.hide()
+            self._last_tray_message_type = "minimized"
+            try:
+                if self.tray_icon.isVisible():
+                    self.tray_icon.showMessage(
+                        "Inteligentny Dyktafon AI",
+                        "Aplikacja została zminimalizowana do zasobnika systemowego i nadal działa w tle.",
+                        QSystemTrayIcon.MessageIcon.Information,
+                        3000
+                    )
+            except Exception:
+                pass
+            return
+
+        # 3. Standardowe, pełne zamykanie aplikacji
         try:
             self.timer.stop()
 
