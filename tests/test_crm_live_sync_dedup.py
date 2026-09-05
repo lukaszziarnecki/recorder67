@@ -3,7 +3,7 @@ import sys
 import copy
 import uuid
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Ustawienie ścieżki do projektu
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -160,3 +160,128 @@ def test_crm_live_sync_prevents_on2_duplication():
 
     # Łącznie wysłano dokładnie 4 unikalne segmenty w 4 blokach:
     assert len(_synced_turn_ids) == 4
+
+
+def test_append_live_segments_uses_merge_duplicates_header():
+    """
+    Weryfikuje, że zapytanie HTTP do PostgREST zawiera nagłówek
+    'Prefer: return=minimal,resolution=merge-duplicates' zabezpieczający przed błędem 409 Conflict.
+    """
+    from recorder.core.cloud_sync import CloudSyncManager
+    manager = CloudSyncManager()
+    old_config = dict(manager.config)
+    try:
+        manager.config.update({
+            "sync_target": "emanager",
+            "supabase_url": "https://test.supabase.co",
+            "supabase_key": "test-anon-key"
+        })
+
+        segments = [{"id": str(uuid.uuid4()), "start": 0.0, "end": 2.0, "speaker": "Mikrofon", "text": "Test"}]
+
+        mock_resp = MagicMock()
+        mock_resp.status = 201
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            manager._append_live_segments_worker("test-meet-id", segments, "Test", 2.0, 1)
+
+            assert mock_urlopen.call_count >= 1
+            req = mock_urlopen.call_args_list[0][0][0]
+            assert "resolution=merge-duplicates" in req.headers.get("Prefer", "")
+    finally:
+        manager.config = old_config
+
+
+def test_append_live_segments_retries_on_network_failure_without_loss():
+    """
+    Weryfikuje odporność na awarię sieci: jeśli zapytanie HTTP w bloku #1 rzuci błąd
+    (np. timeout / brak sieci), segmenty nie przepadają, lecz zostają w buforze pending
+    i są pomyślnie wysyłane wraz z kolejnym blokiem #2.
+    """
+    from recorder.core.cloud_sync import CloudSyncManager
+    import urllib.error
+    import json
+
+    manager = CloudSyncManager()
+    old_config = dict(manager.config)
+    try:
+        manager.config.update({
+            "sync_target": "emanager",
+            "supabase_url": "https://test.supabase.co",
+            "supabase_key": "test-anon-key"
+        })
+        with manager._live_sync_lock:
+            manager._pending_live_segments = []
+
+        seg1 = {"id": str(uuid.uuid4()), "start": 0.0, "end": 2.0, "speaker": "Mikrofon", "text": "Pierwsza część"}
+        seg2 = {"id": str(uuid.uuid4()), "start": 2.5, "end": 5.0, "speaker": "Mikrofon", "text": "Druga część"}
+
+        # Blok 1: awaria sieci (URLError / timeout)
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection timed out")):
+            manager._append_live_segments_worker("test-meet-id", [seg1], "Pierwsza część", 2.0, 1)
+
+        # Segment seg1 NIE przepadł – pozostał w buforze pending!
+        with manager._live_sync_lock:
+            assert len(manager._pending_live_segments) == 1
+            assert manager._pending_live_segments[0]["id"] == seg1["id"]
+
+        # Blok 2: sieć wraca – dochodzi seg2
+        mock_resp = MagicMock()
+        mock_resp.status = 201
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            manager._append_live_segments_worker("test-meet-id", [seg2], "Pierwsza część Druga część", 5.0, 1)
+
+            # Sprawdź dane wysłane w POST do meeting_segments
+            req = mock_urlopen.call_args_list[0][0][0]
+            posted_rows = json.loads(req.data.decode("utf-8"))
+            # Obie wypowiedzi (zaległa seg1 oraz nowa seg2) zostały wysłane w jednej paczce!
+            assert len(posted_rows) == 2
+            ids = [r["id"] for r in posted_rows]
+            assert seg1["id"] in ids
+            assert seg2["id"] in ids
+
+        # Po udanej wysyłce bufor pending jest pusty
+        with manager._live_sync_lock:
+            assert len(manager._pending_live_segments) == 0
+    finally:
+        manager.config = old_config
+
+
+def test_save_segments_to_supabase_handles_sparse_keys():
+    """
+    Weryfikuje, że metoda _save_segments_to_supabase bezpiecznie obsługuje słowniki
+    o brakujących kluczach bez rzucania wyjątku KeyError.
+    """
+    from recorder.core.cloud_sync import CloudSyncManager
+    import json
+
+    manager = CloudSyncManager()
+    sparse_segments = [
+        {"speaker": "Jan", "start": 1.0, "end": 2.0, "text": "Dzień dobry"},
+        {"text": "Brak mówcy i czasów"},  # brak speaker, start, end
+        {}  # całkowicie pusty słownik
+    ]
+
+    mock_resp = MagicMock()
+    mock_resp.status = 201
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+        manager._save_segments_to_supabase(
+            base_url="https://test.supabase.co",
+            headers={"apikey": "test"},
+            meeting_id="test-meet-id",
+            segments=sparse_segments
+        )
+        assert mock_urlopen.call_count >= 2  # DELETE + POST
+        post_req = mock_urlopen.call_args_list[1][0][0]
+        rows = json.loads(post_req.data.decode("utf-8"))
+        assert len(rows) == 3
+        assert rows[1]["speaker_name"] == "Mówca"
+        assert rows[1]["start_time"] == 0.0
+        assert rows[2]["text"] == ""
+        assert "resolution=merge-duplicates" in post_req.headers.get("Prefer", "")
+

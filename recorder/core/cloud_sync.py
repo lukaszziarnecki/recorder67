@@ -49,6 +49,9 @@ class CloudSyncManager:
         self.signals = CloudSyncSignals()
         self.config = get_cloud_sync_config()
         self._is_processing_queue = False
+        self._live_sync_lock = threading.Lock()
+        self._pending_live_segments: List[Dict[str, Any]] = []
+        self._latest_synced_duration: float = 0.0
         os.makedirs(SYNC_QUEUE_DIR, exist_ok=True)
 
     def reload_config(self):
@@ -69,6 +72,10 @@ class CloudSyncManager:
         self.reload_config()
         if not meeting_id:
             meeting_id = str(uuid.uuid4())
+
+        with self._live_sync_lock:
+            self._pending_live_segments = []
+            self._latest_synced_duration = 0.0
 
         title_str = title or f"Spotkanie biurowe {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         threading.Thread(
@@ -111,6 +118,9 @@ class CloudSyncManager:
         Finalizuje sesję spotkania w Supabase (zmienia status na 'completed', kompresuje i wgrywa audio).
         """
         self.reload_config()
+        with self._live_sync_lock:
+            self._pending_live_segments = []
+            self._latest_synced_duration = 0.0
         threading.Thread(
             target=self._finalize_live_session_worker,
             args=(meeting_id, final_transcript, duration_seconds, audio_path, turns, title),
@@ -303,17 +313,32 @@ class CloudSyncManager:
         if not url or not key:
             return
 
+        # Dołącz nowe segmenty do bufora pending (ochrona przed utratą przy awariach sieci)
+        with self._live_sync_lock:
+            if new_segments:
+                existing_ids = {s.get("id") for s in self._pending_live_segments if s.get("id")}
+                for s in new_segments:
+                    sid = s.get("id")
+                    if not sid or sid not in existing_ids:
+                        self._pending_live_segments.append(s)
+                        if sid:
+                            existing_ids.add(sid)
+            batch_to_send = list(self._pending_live_segments)
+
         headers = {
             "apikey": key,
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
-            "Prefer": "return=minimal"
+            "Prefer": "return=minimal,resolution=merge-duplicates"
         }
 
-        # 1. Wstaw nowe segmenty mowy do tabeli meeting_segments
-        if new_segments:
+        segments_sent_successfully = False
+        sent_count = 0
+
+        # 1. Wstaw nowe i ewentualne zaległe segmenty mowy do tabeli meeting_segments
+        if batch_to_send:
             rows = []
-            for s in new_segments:
+            for s in batch_to_send:
                 row = {
                     "meeting_id": meeting_id,
                     "speaker_name": s.get("speaker", "Mówca"),
@@ -339,6 +364,17 @@ class CloudSyncManager:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     if resp.status in (200, 201, 204):
                         logger.info(f"[LIVE STREAM] Pomyślnie wysłano {len(rows)} segmentów do meeting_segments ({meeting_id})")
+                        segments_sent_successfully = True
+                        sent_count = len(rows)
+                        with self._live_sync_lock:
+                            sent_ids = {r.get("id") for r in rows if r.get("id")}
+                            if sent_ids:
+                                self._pending_live_segments = [
+                                    p for p in self._pending_live_segments
+                                    if p.get("id") not in sent_ids
+                                ]
+                            else:
+                                self._pending_live_segments = []
             except urllib.error.HTTPError as he:
                 err_body = ""
                 try:
@@ -350,25 +386,33 @@ class CloudSyncManager:
                 logger.warning(f"[LIVE STREAM] Błąd wysyłki meeting_segments: {e}")
 
         # 2. Zaktualizuj nagłówek spotkania w tabeli meetings (aktualny pełny tekst i czas trwania)
-        patch_data = {
-            "transcript": full_transcript.strip(),
-            "duration_seconds": int(duration_seconds),
-            "speaker_count": max(1, speaker_count),
-            "status": "recording"
-        }
-        try:
-            req = urllib.request.Request(
-                f"{url}/rest/v1/meetings?id=eq.{meeting_id}",
-                data=json.dumps(patch_data).encode("utf-8"),
-                headers=headers,
-                method="PATCH"
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                pass
-        except Exception as e:
-            logger.warning(f"[LIVE STREAM] Błąd PATCH spotkania meetings ({meeting_id}): {e}")
+        should_patch_meeting = False
+        with self._live_sync_lock:
+            if duration_seconds >= self._latest_synced_duration:
+                self._latest_synced_duration = duration_seconds
+                should_patch_meeting = True
 
-        self.signals.live_block_synced.emit(meeting_id, len(new_segments) if new_segments else 0)
+        if should_patch_meeting:
+            patch_data = {
+                "transcript": full_transcript.strip(),
+                "duration_seconds": int(duration_seconds),
+                "speaker_count": max(1, speaker_count),
+                "status": "recording"
+            }
+            try:
+                req = urllib.request.Request(
+                    f"{url}/rest/v1/meetings?id=eq.{meeting_id}",
+                    data=json.dumps(patch_data).encode("utf-8"),
+                    headers=headers,
+                    method="PATCH"
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    pass
+            except Exception as e:
+                logger.warning(f"[LIVE STREAM] Błąd PATCH spotkania meetings ({meeting_id}): {e}")
+
+        if segments_sent_successfully and sent_count > 0:
+            self.signals.live_block_synced.emit(meeting_id, sent_count)
 
     def _finalize_live_session_worker(
         self,
@@ -568,18 +612,29 @@ class CloudSyncManager:
         # 2. Wstaw nowe segmenty
         rows = []
         for s in segments:
-            rows.append({
+            row = {
                 "meeting_id": meeting_id,
-                "speaker_name": s["speaker"],
-                "start_time": s["start"],
-                "end_time": s["end"],
-                "text": s["text"]
-            })
+                "speaker_name": s.get("speaker", "Mówca"),
+                "start_time": float(s.get("start", 0.0)),
+                "end_time": float(s.get("end", 0.0)),
+                "text": str(s.get("text", "")).strip()
+            }
+            turn_id = s.get("id")
+            if turn_id:
+                try:
+                    uuid.UUID(str(turn_id))
+                    row["id"] = str(turn_id)
+                except (ValueError, TypeError):
+                    pass
+            rows.append(row)
+
+        post_headers = dict(headers)
+        post_headers["Prefer"] = "return=minimal,resolution=merge-duplicates"
 
         req = urllib.request.Request(
             f"{base_url}/rest/v1/meeting_segments",
             data=json.dumps(rows).encode("utf-8"),
-            headers=headers,
+            headers=post_headers,
             method="POST"
         )
         try:
