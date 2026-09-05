@@ -3,7 +3,7 @@ import sys
 import tempfile
 from typing import Optional
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTabWidget, QWidget, QTextEdit, QTextBrowser, QComboBox,
     QSlider, QSpinBox, QCheckBox, QGroupBox, QFormLayout,
     QMessageBox, QFrame, QSizePolicy, QProgressBar, QScrollArea
@@ -87,6 +87,11 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("⚙️ Ustawienia Dyktafonu AI")
         from recorder.ui.windows_integration import get_app_icon_path
+        from recorder.config import get_theme, get_font_size
+        self._initial_theme = get_theme()
+        self._initial_font_size = get_font_size()
+        self._theme_previewed = False
+
         ico = get_app_icon_path("ico")
         if ico and os.path.exists(ico):
             self.setWindowIcon(QIcon(ico))
@@ -104,41 +109,18 @@ class SettingsDialog(QDialog):
         header_layout = QHBoxLayout()
         lbl_title = QLabel("⚙️ Konfiguracja & Preferencje AI")
         lbl_title.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-        lbl_title.setStyleSheet("color: #4cc9f0;")
+        lbl_title.setObjectName("LblSettingsHeaderTitle")
         header_layout.addWidget(lbl_title)
         header_layout.addStretch()
         main_layout.addLayout(header_layout)
 
         # Zakładki
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #2b2d42;
-                background-color: #1e1e2f;
-                border-radius: 8px;
-                padding: 12px;
-            }
-            QTabBar::tab {
-                background: #181824;
-                color: #8d99ae;
-                padding: 8px 16px;
-                margin-right: 4px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-weight: 500;
-            }
-            QTabBar::tab:selected {
-                background: #2b2d42;
-                color: #4cc9f0;
-                font-weight: bold;
-            }
-            QTabBar::tab:hover {
-                color: #edf2f4;
-            }
-        """)
+        self.tabs.setObjectName("SettingsTabWidget")
 
         self._create_tab_dictionary()
         self._create_tab_vad()
+        self._create_tab_appearance()
         self._create_tab_cloud()
         self._create_tab_updates()
 
@@ -149,56 +131,17 @@ class SettingsDialog(QDialog):
         btn_bar.setSpacing(10)
 
         self.btn_restore_defaults = QPushButton("🔄 Przywróć Domyślne")
-        self.btn_restore_defaults.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #8d99ae;
-                border: 1px solid #3d405b;
-                border-radius: 6px;
-                padding: 8px 14px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-                color: #edf2f4;
-            }
-        """)
         self.btn_restore_defaults.clicked.connect(self._restore_defaults)
         btn_bar.addWidget(self.btn_restore_defaults)
 
         btn_bar.addStretch()
 
         self.btn_cancel = QPushButton("Anuluj")
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-            }
-        """)
         self.btn_cancel.clicked.connect(self.reject)
         btn_bar.addWidget(self.btn_cancel)
 
         self.btn_save = QPushButton("💾 Zapisz Ustawienia")
-        self.btn_save.setStyleSheet("""
-            QPushButton {
-                background-color: #10b981;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-        """)
+        self.btn_save.setObjectName("BtnSave")
         self.btn_save.clicked.connect(self._save_and_accept)
         btn_bar.addWidget(self.btn_save)
 
@@ -212,7 +155,6 @@ class SettingsDialog(QDialog):
 
         # Sekcja: Słownik Branżowy
         box_dict = QGroupBox("📚 Słownik Słów Branżowych & Nazw Własnych (Initial Prompt)")
-        box_dict.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         dict_layout = QVBoxLayout(box_dict)
 
         lbl_dict_info = QLabel(
@@ -220,46 +162,32 @@ class SettingsDialog(QDialog):
             "(oddzielone przecinkami). Model Whisper traktuje je jako priorytetowy kontekst fonetyczny:"
         )
         lbl_dict_info.setWordWrap(True)
-        lbl_dict_info.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        lbl_dict_info.setObjectName("LblSettingDesc")
         dict_layout.addWidget(lbl_dict_info)
 
         self.txt_keywords = QTextEdit()
         self.txt_keywords.setPlaceholderText("np. Aldent, Subiekt GT, faktura proforma, i5-11400, CRM, Helpdesk...")
         self.txt_keywords.setMaximumHeight(90)
-        self.txt_keywords.setStyleSheet("""
-            QTextEdit {
-                background-color: #181824;
-                color: #edf2f4;
-                border: 1px solid #2b2d42;
-                border-radius: 6px;
-                padding: 8px;
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 12px;
-            }
-            QTextEdit:focus {
-                border: 1px solid #4cc9f0;
-            }
-        """)
         dict_layout.addWidget(self.txt_keywords)
 
         # Przyciski szablonów
         preset_layout = QHBoxLayout()
         lbl_presets = QLabel("Szybkie szablony:")
-        lbl_presets.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        lbl_presets.setObjectName("LblSettingDesc")
         preset_layout.addWidget(lbl_presets)
 
         btn_preset_it = QPushButton("+ Szablon IT & Biuro")
-        btn_preset_it.setStyleSheet("background: #2b2d42; color: #4cc9f0; font-size: 11px; padding: 4px 8px; border-radius: 4px;")
+        btn_preset_it.setObjectName("BtnPreset")
         btn_preset_it.clicked.connect(lambda: self._append_preset(self.PRESET_KEYWORDS_IT))
         preset_layout.addWidget(btn_preset_it)
 
         btn_preset_sales = QPushButton("+ Szablon Sprzedaż")
-        btn_preset_sales.setStyleSheet("background: #2b2d42; color: #4cc9f0; font-size: 11px; padding: 4px 8px; border-radius: 4px;")
+        btn_preset_sales.setObjectName("BtnPreset")
         btn_preset_sales.clicked.connect(lambda: self._append_preset(self.PRESET_KEYWORDS_SALES))
         preset_layout.addWidget(btn_preset_sales)
 
         btn_clear_dict = QPushButton("Wyczyść")
-        btn_clear_dict.setStyleSheet("background: #2b2d42; color: #e63946; font-size: 11px; padding: 4px 8px; border-radius: 4px;")
+        btn_clear_dict.setObjectName("BtnDanger")
         btn_clear_dict.clicked.connect(self.txt_keywords.clear)
         preset_layout.addWidget(btn_clear_dict)
 
@@ -269,28 +197,16 @@ class SettingsDialog(QDialog):
 
         # Sekcja: Dokładność Whispera (Beam Size)
         box_whisper = QGroupBox("🎯 Precyzja Transkrypcji Whispera (Beam Search)")
-        box_whisper.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         whisper_layout = QVBoxLayout(box_whisper)
 
         beam_row = QHBoxLayout()
         lbl_beam = QLabel("Tryb przeszukiwania hipotez (Beam Size):")
-        lbl_beam.setStyleSheet("color: #edf2f4; font-size: 12px;")
         beam_row.addWidget(lbl_beam)
 
         self.combo_beam = QComboBox()
         self.combo_beam.addItem("⚡ Szybki (Beam Size = 1) - minimalne użycie CPU", 1)
         self.combo_beam.addItem("⚖️ Zrównoważony (Beam Size = 3) - dobry balans", 3)
         self.combo_beam.addItem("🚀 Maksymalna Dokładność (Beam Size = 5) [Zalecany]", 5)
-        self.combo_beam.setStyleSheet("""
-            QComboBox {
-                background-color: #181824;
-                color: #edf2f4;
-                border: 1px solid #2b2d42;
-                border-radius: 6px;
-                padding: 6px 12px;
-                min-width: 260px;
-            }
-        """)
         beam_row.addWidget(self.combo_beam)
         whisper_layout.addLayout(beam_row)
 
@@ -299,11 +215,10 @@ class SettingsDialog(QDialog):
             "błędy fonetyczne i przekręcanie związków frazeologicznych bez widocznego narzutu na czas."
         )
         lbl_beam_desc.setWordWrap(True)
-        lbl_beam_desc.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        lbl_beam_desc.setObjectName("LblSettingDesc")
         whisper_layout.addWidget(lbl_beam_desc)
 
         self.chk_adaptive_beam = QCheckBox("🚀 Automatyczny bieg turbo (Adaptacyjny Beam Size przy zatorach w kolejce)")
-        self.chk_adaptive_beam.setStyleSheet("color: #a78bfa; font-size: 11px; font-weight: bold; margin-top: 6px;")
         self.chk_adaptive_beam.setToolTip(
             "Opcja zalecana podczas wielogodzinnych maratonów (4h–8h) na słabszych procesorach.\n"
             "Gdy w kolejce transkrypcji powstanie opóźnienie (więcej niż 1 blok), tymczasowo redukuje parametr beam_size=1,\n"
@@ -315,24 +230,21 @@ class SettingsDialog(QDialog):
 
         # Sekcja: Token HuggingFace
         box_hf = QGroupBox("🔑 Dostęp do Rozpoznawania Osób (PyAnnote HuggingFace)")
-        box_hf.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         hf_layout = QVBoxLayout(box_hf)
 
         hf_input_row = QHBoxLayout()
         self.txt_hf_token = QLineEdit()
         self.txt_hf_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_hf_token.setPlaceholderText("hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-        self.txt_hf_token.setStyleSheet("background-color: #181824; color: #edf2f4; border: 1px solid #2b2d42; border-radius: 6px; padding: 6px 10px;")
         hf_input_row.addWidget(self.txt_hf_token, stretch=1)
 
         self.btn_toggle_hf = QPushButton("👁️ Pokaż")
-        self.btn_toggle_hf.setStyleSheet("background-color: #2b2d42; color: #edf2f4; border: 1px solid #3d405b; border-radius: 6px; padding: 6px 12px;")
         self.btn_toggle_hf.clicked.connect(self._toggle_hf_visibility)
         hf_input_row.addWidget(self.btn_toggle_hf)
         hf_layout.addLayout(hf_input_row)
 
         lbl_hf_info = QLabel("Token wymagany do pobrania modeli diaryzacji mowy (pyannote/speaker-diarization-3.1).")
-        lbl_hf_info.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        lbl_hf_info.setObjectName("LblSettingDesc")
         hf_layout.addWidget(lbl_hf_info)
         layout.addWidget(box_hf)
 
@@ -347,7 +259,6 @@ class SettingsDialog(QDialog):
 
         # Sekcja: Domyślne Źródło Audio
         box_source = QGroupBox("Domyślne Źródło Dźwięku")
-        box_source.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         source_layout = QFormLayout(box_source)
         source_layout.setSpacing(10)
 
@@ -355,13 +266,11 @@ class SettingsDialog(QDialog):
         self.combo_default_source_mode.addItem("🎙️+🎧 Mikrofon + Dźwięk Systemu", RecordSourceMode.HYBRID_DUAL)
         self.combo_default_source_mode.addItem("🎙️ Tylko Mikrofon", RecordSourceMode.MIC_ONLY)
         self.combo_default_source_mode.addItem("🎧 Tylko Dźwięk Systemu", RecordSourceMode.SYSTEM_ONLY)
-        self.combo_default_source_mode.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 6px 10px; border-radius: 6px;")
         source_layout.addRow(QLabel("Tryb nagrywania:"), self.combo_default_source_mode)
         layout.addWidget(box_source)
 
         # Sekcja: Czułość VAD Mikrofonu
         box_vad = QGroupBox("🎙️ Czułość Detekcji Mowy Mikrofonu")
-        box_vad.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         vad_layout = QVBoxLayout(box_vad)
 
         slider_row = QHBoxLayout()
@@ -374,14 +283,13 @@ class SettingsDialog(QDialog):
         slider_row.addWidget(self.slider_vad, stretch=1)
 
         self.lbl_vad_val = QLabel("0.42 (Zalecany)")
-        self.lbl_vad_val.setStyleSheet("color: #10b981; font-weight: bold; min-width: 140px;")
+        self.lbl_vad_val.setObjectName("LblVadVal")
         slider_row.addWidget(self.lbl_vad_val)
         vad_layout.addLayout(slider_row)
         layout.addWidget(box_vad)
 
         # Sekcja: Czułość VAD Dźwięku Systemu
         box_vad_sys = QGroupBox("🎧 Czułość Detekcji Dźwięku Systemu")
-        box_vad_sys.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         vad_sys_layout = QVBoxLayout(box_vad_sys)
 
         sys_slider_row = QHBoxLayout()
@@ -394,14 +302,13 @@ class SettingsDialog(QDialog):
         sys_slider_row.addWidget(self.slider_vad_sys, stretch=1)
 
         self.lbl_vad_sys_val = QLabel("0.42 (Zalecany)")
-        self.lbl_vad_sys_val.setStyleSheet("color: #a370f7; font-weight: bold; min-width: 140px;")
+        self.lbl_vad_sys_val.setObjectName("LblVadSysVal")
         sys_slider_row.addWidget(self.lbl_vad_sys_val)
         vad_sys_layout.addLayout(sys_slider_row)
         layout.addWidget(box_vad_sys)
 
         # Sekcja: Czasy i sesje
         box_time = QGroupBox("⏱️ Zarządzanie Ciszą i Sesjami Nagrywania")
-        box_time.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         time_layout = QFormLayout(box_time)
         time_layout.setSpacing(12)
 
@@ -409,7 +316,6 @@ class SettingsDialog(QDialog):
         self.spin_auto_pause.setRange(1, 15)
         self.spin_auto_pause.setValue(5)
         self.spin_auto_pause.setSuffix(" sek.")
-        self.spin_auto_pause.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 4px 8px; border-radius: 4px;")
         time_layout.addRow(QLabel("Czas ciszy do automatycznej pauzy:"), self.spin_auto_pause)
 
         self.combo_session_split = QComboBox()
@@ -418,7 +324,6 @@ class SettingsDialog(QDialog):
         self.combo_session_split.addItem("30 minut ciągłej ciszy", 1800.0)
         self.combo_session_split.addItem("1 godzina ciągłej ciszy", 3600.0)
         self.combo_session_split.addItem("Wyłączone (Zawsze jedna długa sesja)", 0.0)
-        self.combo_session_split.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 4px 8px; border-radius: 4px;")
         time_layout.addRow(QLabel("Automatyczny podział sesji:"), self.combo_session_split)
 
         self.combo_silence_alert = QComboBox()
@@ -430,50 +335,35 @@ class SettingsDialog(QDialog):
         self.combo_silence_alert.addItem("15 minut braku głosu", 15.0)
         self.combo_silence_alert.addItem("20 minut braku głosu", 20.0)
         self.combo_silence_alert.addItem("Wyłączone (Brak ostrzeżeń)", 0.0)
-        self.combo_silence_alert.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 4px 8px; border-radius: 4px;")
         time_layout.addRow(QLabel("Ostrzeżenie o braku dźwięku:"), self.combo_silence_alert)
 
         self.btn_test_alert = QPushButton("🔔 Przetestuj powiadomienie")
         self.btn_test_alert.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_test_alert.setStyleSheet("""
-            QPushButton {
-                background: #2b2d42;
-                color: #4cc9f0;
-                border: 1px solid #4361ee;
-                border-radius: 4px;
-                padding: 6px 14px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background: #3a0ca3;
-                color: #ffffff;
-            }
-        """)
+        self.btn_test_alert.setObjectName("BtnPreset")
         self.btn_test_alert.clicked.connect(self._on_test_alert_clicked)
         time_layout.addRow("", self.btn_test_alert)
-
-        self.combo_timestamp_format = QComboBox()
-        self.combo_timestamp_format.addItem("Tylko offset [00:12 - 00:18] (Domyślne)", "offset_only")
-        self.combo_timestamp_format.addItem("Offset + Godzina realna [00:12 | 13:47:12]", "offset+clock")
-        self.combo_timestamp_format.addItem("Tylko godzina realna [13:47:12 - 13:47:18]", "clock_only")
-        self.combo_timestamp_format.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 4px 8px; border-radius: 4px;")
-        time_layout.addRow(QLabel("Format timestampów w transkrypcji:"), self.combo_timestamp_format)
-
-        self.combo_preview_order = QComboBox()
-        self.combo_preview_order.addItem("Od najnowszych", "newest_first")
-        self.combo_preview_order.addItem("Od najstarszych", "chronological")
-        self.combo_preview_order.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 4px 8px; border-radius: 4px;")
-        self.combo_preview_order.currentIndexChanged.connect(self._on_preview_order_changed)
-        time_layout.addRow(QLabel("Kolejność w podglądzie:"), self.combo_preview_order)
-
-        self.chk_auto_scroll = QCheckBox("Automatycznie przewijaj widok do najnowszych wypowiedzi")
-        self.chk_auto_scroll.setStyleSheet("color: #edf2f4;")
-        time_layout.addRow("", self.chk_auto_scroll)
 
         layout.addWidget(box_time)
         layout.addStretch()
         self.tabs.addTab(tab, "🎙️ Audio i VAD")
+
+    def _create_tab_appearance(self):
+        """Karta 3: Wygląd i Personalizacja (Motywy, Czytelność, Okno)."""
+        from recorder.ui.appearance_tab import AppearanceTab
+        from recorder.config import load_user_settings
+        st = load_user_settings()
+        self.appearance_tab = AppearanceTab(
+            parent=self,
+            settings=st,
+            on_theme_preview=self._on_theme_preview,
+            on_font_size_preview=self._on_font_size_preview,
+        )
+        self.tab_appearance = self.appearance_tab
+        # Aliasy dla kompatybilności wstecznej
+        self.combo_timestamp_format = self.appearance_tab.combo_timestamp_format
+        self.combo_preview_order = self.appearance_tab.combo_preview_order
+        self.chk_auto_scroll = self.appearance_tab.chk_auto_scroll
+        self.tabs.addTab(self.appearance_tab, "🎨 Wygląd i Personalizacja")
 
     def _create_tab_cloud(self):
         """Karta 3: Chmura, Supabase, Stanowisko i Webhook."""
@@ -482,53 +372,43 @@ class SettingsDialog(QDialog):
         layout.setSpacing(12)
 
         box_ident = QGroupBox("💻 Identyfikacja Stanowiska Komputerowego")
-        box_ident.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         ident_layout = QFormLayout(box_ident)
 
         self.txt_device_name = QLineEdit()
         self.txt_device_name.setPlaceholderText("np. Biuro-Adrian / Sala-Konferencyjna-1")
-        self.txt_device_name.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 6px 10px; border-radius: 6px;")
         ident_layout.addRow(QLabel("Nazwa Stanowiska:"), self.txt_device_name)
 
         self.txt_org_id = QLineEdit()
         self.txt_org_id.setPlaceholderText("default_org / emanager_main")
-        self.txt_org_id.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 6px 10px; border-radius: 6px;")
         ident_layout.addRow(QLabel("ID Organizacji:"), self.txt_org_id)
         layout.addWidget(box_ident)
 
         box_sync = QGroupBox("☁️ Cel Synchronizacji Chmurowej (CRM / n8n / Supabase)")
-        box_sync.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         sync_layout = QFormLayout(box_sync)
 
         self.combo_sync_target = QComboBox()
         self.combo_sync_target.addItem("EMANAGER.PRO (Bezpośrednio do bazy Supabase)", "emanager")
         self.combo_sync_target.addItem("Własny Webhook (n8n / Make / Zapier)", "generic_webhook")
         self.combo_sync_target.addItem("Wyłączona (Tylko pliki lokalne)", "none")
-        self.combo_sync_target.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 6px 10px; border-radius: 6px;")
         sync_layout.addRow(QLabel("Cel wysyłki danych:"), self.combo_sync_target)
 
         self.txt_supabase_url = QLineEdit()
         self.txt_supabase_url.setPlaceholderText("https://xyz.supabase.co")
-        self.txt_supabase_url.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 6px 10px; border-radius: 6px;")
         sync_layout.addRow(QLabel("Adres Supabase URL:"), self.txt_supabase_url)
 
         self.txt_supabase_key = QLineEdit()
         self.txt_supabase_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_supabase_key.setPlaceholderText("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
-        self.txt_supabase_key.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 6px 10px; border-radius: 6px;")
         sync_layout.addRow(QLabel("Klucz Supabase Key:"), self.txt_supabase_key)
 
         self.txt_webhook_url = QLineEdit()
         self.txt_webhook_url.setPlaceholderText("https://twoj-serwer-n8n.pl/webhook/meeting-ingest")
-        self.txt_webhook_url.setStyleSheet("background: #181824; color: #edf2f4; border: 1px solid #2b2d42; padding: 6px 10px; border-radius: 6px;")
         sync_layout.addRow(QLabel("Adres Webhook URL:"), self.txt_webhook_url)
 
         self.chk_auto_sync = QCheckBox("Automatycznie wysyłaj transkrypcję po zakończeniu nagrania")
-        self.chk_auto_sync.setStyleSheet("color: #edf2f4;")
         sync_layout.addRow("", self.chk_auto_sync)
 
         self.chk_upload_audio = QCheckBox("Dołączaj plik dźwiękowy WAV do chmury (umożliwia odsłuch)")
-        self.chk_upload_audio.setStyleSheet("color: #edf2f4;")
         sync_layout.addRow("", self.chk_upload_audio)
 
         layout.addWidget(box_sync)
@@ -598,7 +478,6 @@ class SettingsDialog(QDialog):
 
         # Informacja o bieżącej wersji
         grp_cur = QGroupBox("📌 Informacje o Aplikacji")
-        grp_cur.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         cur_layout = QFormLayout(grp_cur)
         cur_layout.setContentsMargins(12, 12, 12, 12)
         cur_layout.setSpacing(10)
@@ -608,17 +487,15 @@ class SettingsDialog(QDialog):
         cur_layout.addRow("Zainstalowana wersja:", lbl_v)
 
         lbl_repo = QLabel(f"<code>{GITHUB_REPO}</code>")
-        lbl_repo.setStyleSheet("color: #8d99ae;")
+        lbl_repo.setObjectName("LblSettingDesc")
         cur_layout.addRow("Repozytorium wydań:", lbl_repo)
 
         self.chk_auto_check_startup = QCheckBox("Sprawdzaj dostępność aktualizacji automatycznie przy starcie aplikacji")
         self.chk_auto_check_startup.setChecked(True)
-        self.chk_auto_check_startup.setStyleSheet("color: #edf2f4;")
         cur_layout.addRow("", self.chk_auto_check_startup)
 
         self.chk_check_prereleases = QCheckBox("Uwzględniaj wersje testowe (Pre-release / Alpha / Beta)")
         self.chk_check_prereleases.setChecked(True)
-        self.chk_check_prereleases.setStyleSheet("color: #edf2f4;")
         cur_layout.addRow("", self.chk_check_prereleases)
 
         layout.addWidget(grp_cur)
@@ -626,30 +503,13 @@ class SettingsDialog(QDialog):
         # Pasek sprawdzania aktualizacji
         check_box = QHBoxLayout()
         self.btn_check_updates = QPushButton("🔍 Sprawdź dostępność aktualizacji")
-        self.btn_check_updates.setStyleSheet("""
-            QPushButton {
-                background-color: #4361ee;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 18px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #3a0ca3;
-            }
-            QPushButton:disabled {
-                background-color: #3d405b;
-                color: #8d99ae;
-            }
-        """)
+        self.btn_check_updates.setObjectName("BtnCheckUpdates")
         self.btn_check_updates.clicked.connect(self._on_check_updates_clicked)
         check_box.addWidget(self.btn_check_updates)
 
         self.lbl_update_status = QLabel("Kliknij przycisk, aby sprawdzić najnowsze wydanie na GitHubie.")
         self.lbl_update_status.setWordWrap(True)
-        self.lbl_update_status.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        self.lbl_update_status.setObjectName("LblSettingDesc")
         check_box.addWidget(self.lbl_update_status, stretch=1)
         layout.addLayout(check_box)
 
@@ -657,58 +517,28 @@ class SettingsDialog(QDialog):
         self.progress_download = QProgressBar()
         self.progress_download.setRange(0, 100)
         self.progress_download.setTextVisible(True)
-        self.progress_download.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d405b;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #181824;
-                color: #edf2f4;
-                font-weight: bold;
-                height: 18px;
-            }
-            QProgressBar::chunk {
-                background-color: #10b981;
-                border-radius: 3px;
-            }
-        """)
         self.progress_download.setVisible(False)
         layout.addWidget(self.progress_download)
 
         # Ramka z informacjami o nowej wersji (domyślnie ukryta)
         self.grp_new_version = QGroupBox("🎉 Dostępna nowa wersja!")
-        self.grp_new_version.setStyleSheet("QGroupBox { font-weight: bold; color: #10b981; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         new_v_layout = QVBoxLayout(self.grp_new_version)
         new_v_layout.setContentsMargins(12, 12, 12, 12)
         new_v_layout.setSpacing(8)
 
         self.lbl_new_version_title = QLabel("")
         self.lbl_new_version_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self.lbl_new_version_title.setStyleSheet("color: #edf2f4;")
         self.lbl_new_version_title.setWordWrap(True)
+        self.lbl_new_version_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         new_v_layout.addWidget(self.lbl_new_version_title)
 
         # Wybór wersji changelogu (szczególnie przydatne, gdy użytkownik jest o kilka wersji do tyłu)
         self.version_select_row = QHBoxLayout()
         self.lbl_select_version = QLabel("Wyświetlane zmiany:")
-        self.lbl_select_version.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        self.lbl_select_version.setObjectName("LblSettingDesc")
         self.combo_changelog_version = QComboBox()
-        self.combo_changelog_version.setStyleSheet("""
-            QComboBox {
-                background-color: #181824;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #181824;
-                color: #edf2f4;
-                selection-background-color: #4361ee;
-            }
-        """)
+        self.combo_changelog_version.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_changelog_version.setMinimumContentsLength(10)
         self.combo_changelog_version.currentIndexChanged.connect(self._on_changelog_version_changed)
         self.version_select_row.addWidget(self.lbl_select_version)
         self.version_select_row.addWidget(self.combo_changelog_version, stretch=1)
@@ -718,52 +548,15 @@ class SettingsDialog(QDialog):
         self.txt_changelog.setReadOnly(True)
         self.txt_changelog.setOpenExternalLinks(True)
         self.txt_changelog.setMinimumHeight(240)
-        self.txt_changelog.setStyleSheet("""
-            QTextBrowser {
-                background-color: #14141e;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 6px;
-                padding: 10px;
-                font-family: 'Segoe UI', 'Segoe UI Emoji', sans-serif;
-                font-size: 12px;
-                line-height: 1.5;
-                selection-background-color: #4361ee;
-            }
-        """)
         new_v_layout.addWidget(self.txt_changelog)
 
         btn_row = QHBoxLayout()
         self.btn_download_update = QPushButton("🚀 Pobierz i zainstaluj aktualizację")
-        self.btn_download_update.setStyleSheet("""
-            QPushButton {
-                background-color: #10b981;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-        """)
+        self.btn_download_update.setObjectName("BtnSave")
         self.btn_download_update.clicked.connect(self._on_download_update_clicked)
         btn_row.addWidget(self.btn_download_update)
 
         self.btn_open_release_url = QPushButton("🌐 Strona wydania na GitHubie")
-        self.btn_open_release_url.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 6px;
-                padding: 8px 14px;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-            }
-        """)
         self.btn_open_release_url.clicked.connect(self._on_open_release_url_clicked)
         btn_row.addWidget(self.btn_open_release_url)
         btn_row.addStretch()
@@ -775,70 +568,28 @@ class SettingsDialog(QDialog):
         # Przycisk opcjonalnego rozwinięcia pełnej historii zmian
         self.btn_toggle_history = QPushButton("📜 Pokaż także historię starszych wydań...")
         self.btn_toggle_history.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_toggle_history.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #4cc9f0;
-                border: 1px dashed #3d405b;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2b2d42;
-                border-color: #4cc9f0;
-            }
-        """)
+        self.btn_toggle_history.setObjectName("BtnPreset")
         self.btn_toggle_history.clicked.connect(self._on_toggle_history_clicked)
         self.btn_toggle_history.setVisible(False)
         layout.addWidget(self.btn_toggle_history)
 
         # Sekcja historii wydań (dostępna także, gdy użytkownik jest na najnowszej wersji)
         self.grp_history = QGroupBox("📜 Historia Wydań i Zmian (Changelog)")
-        self.grp_history.setStyleSheet("QGroupBox { font-weight: bold; color: #4cc9f0; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         history_layout = QVBoxLayout(self.grp_history)
         history_layout.setContentsMargins(12, 12, 12, 12)
         history_layout.setSpacing(8)
 
         hist_select_row = QHBoxLayout()
         lbl_hist_version = QLabel("Wybierz wersję:")
-        lbl_hist_version.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        lbl_hist_version.setObjectName("LblSettingDesc")
         self.combo_history_version = QComboBox()
-        self.combo_history_version.setStyleSheet("""
-            QComboBox {
-                background-color: #181824;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #181824;
-                color: #edf2f4;
-                selection-background-color: #4361ee;
-            }
-        """)
+        self.combo_history_version.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_history_version.setMinimumContentsLength(10)
         self.combo_history_version.currentIndexChanged.connect(self._on_history_version_changed)
         hist_select_row.addWidget(lbl_hist_version)
         hist_select_row.addWidget(self.combo_history_version, stretch=1)
 
         self.btn_open_history_url = QPushButton("🌐 Strona tego wydania")
-        self.btn_open_history_url.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 6px;
-                padding: 5px 12px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-            }
-        """)
         self.btn_open_history_url.clicked.connect(self._on_open_history_url_clicked)
         hist_select_row.addWidget(self.btn_open_history_url)
         history_layout.addLayout(hist_select_row)
@@ -847,53 +598,24 @@ class SettingsDialog(QDialog):
         self.txt_history_changelog.setReadOnly(True)
         self.txt_history_changelog.setOpenExternalLinks(True)
         self.txt_history_changelog.setMinimumHeight(200)
-        self.txt_history_changelog.setStyleSheet("""
-            QTextBrowser {
-                background-color: #14141e;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 6px;
-                padding: 10px;
-                font-family: 'Segoe UI', 'Segoe UI Emoji', sans-serif;
-                font-size: 12px;
-                line-height: 1.5;
-                selection-background-color: #4361ee;
-            }
-        """)
         history_layout.addWidget(self.txt_history_changelog)
         layout.addWidget(self.grp_history)
         self.grp_history.setVisible(False)
 
         # Sekcja diagnostyki i logów
         self.grp_diagnostics = QGroupBox("🛠️ Diagnostyka i Dzienniki Zdarzeń (Logi)")
-        self.grp_diagnostics.setStyleSheet("QGroupBox { font-weight: bold; color: #8d99ae; border: 1px solid #2b2d42; border-radius: 6px; margin-top: 6px; padding-top: 12px; }")
         diag_layout = QVBoxLayout(self.grp_diagnostics)
         diag_layout.setContentsMargins(12, 12, 12, 12)
         diag_layout.setSpacing(10)
 
         lbl_diag_desc = QLabel("Zdarzenia i ewentualne błędy są automatycznie zapisywane do pliku logs/app.log (z bezpiecznym maskowaniem kluczy API).")
         lbl_diag_desc.setWordWrap(True)
-        lbl_diag_desc.setStyleSheet("color: #8d99ae; font-size: 11px;")
+        lbl_diag_desc.setObjectName("LblSettingDesc")
         diag_layout.addWidget(lbl_diag_desc)
 
         btn_diag_row = QHBoxLayout()
         self.btn_open_logs = QPushButton("📁 Otwórz folder z logami")
         self.btn_open_logs.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_open_logs.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 6px;
-                padding: 7px 14px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-                border-color: #4cc9f0;
-            }
-        """)
         self.btn_open_logs.clicked.connect(self._on_open_logs_clicked)
         btn_diag_row.addWidget(self.btn_open_logs)
         btn_diag_row.addStretch()
@@ -1220,12 +942,50 @@ class SettingsDialog(QDialog):
         self.chk_check_prereleases.setChecked(bool(st.get("check_prereleases", True)))
         self.chk_auto_check_startup.setChecked(bool(st.get("auto_check_updates_startup", True)))
 
+    def _on_theme_preview(self, theme_id: str):
+        self._theme_previewed = True
+        from recorder.ui.theme import apply_theme, set_window_titlebar_theme, THEMES
+        font_size = self.appearance_tab.get_settings().get("font_size", 13) if hasattr(self, "appearance_tab") else 13
+        apply_theme(QApplication.instance(), theme_id, font_size=font_size, hwnd=int(self.winId()))
+        if self.parent() and hasattr(self.parent(), "winId"):
+            th_def = THEMES.get(theme_id)
+            if th_def:
+                set_window_titlebar_theme(int(self.parent().winId()), th_def.is_dark)
+
+    def _on_font_size_preview(self, font_size: int):
+        self._theme_previewed = True
+        from recorder.ui.theme import apply_theme
+        theme_id = self.appearance_tab.get_settings().get("theme", "classic_dark") if hasattr(self, "appearance_tab") else "classic_dark"
+        apply_theme(QApplication.instance(), theme_id, font_size=font_size, hwnd=int(self.winId()))
+
+    def reject(self):
+        if getattr(self, "_theme_previewed", False):
+            from recorder.ui.theme import apply_theme, set_window_titlebar_theme, THEMES
+            initial_theme = getattr(self, "_initial_theme", "classic_dark")
+            initial_font_size = getattr(self, "_initial_font_size", 13)
+            apply_theme(QApplication.instance(), initial_theme, font_size=initial_font_size, hwnd=int(self.winId()))
+            if self.parent() and hasattr(self.parent(), "winId"):
+                th_def = THEMES.get(initial_theme)
+                if th_def:
+                    set_window_titlebar_theme(int(self.parent().winId()), th_def.is_dark)
+        super().reject()
+
     def select_tab(self, tab_id):
         """Przełącza aktywną zakładkę w oknie ustawień."""
         if isinstance(tab_id, int):
             self.tabs.setCurrentIndex(tab_id)
-        elif tab_id in ("updates", "aktualizacje"):
-            self.tabs.setCurrentIndex(3)
+        elif str(tab_id).lower() in ("updates", "aktualizacje"):
+            for i in range(self.tabs.count()):
+                text = self.tabs.tabText(i).lower()
+                if "aktualizacje" in text or "update" in text:
+                    self.tabs.setCurrentIndex(i)
+                    break
+        elif str(tab_id).lower() in ("appearance", "wyglad", "wygląd", "personalizacja", "motyw", "theme"):
+            for i in range(self.tabs.count()):
+                text = self.tabs.tabText(i).lower()
+                if "wygląd" in text or "personalizacja" in text or "appearance" in text:
+                    self.tabs.setCurrentIndex(i)
+                    break
 
     def _restore_defaults(self):
         """Przywraca zalecane wartości domyślne."""
@@ -1244,10 +1004,8 @@ class SettingsDialog(QDialog):
             self.spin_auto_pause.setValue(5)
             self.combo_session_split.setCurrentIndex(self.combo_session_split.findData(900.0))
             self.combo_silence_alert.setCurrentIndex(self.combo_silence_alert.findData(5.0))
-            self.combo_timestamp_format.setCurrentIndex(self.combo_timestamp_format.findData("offset_only"))
-            self.combo_preview_order.setCurrentIndex(self.combo_preview_order.findData("newest_first"))
-            self.chk_auto_scroll.setChecked(True)
-            self._on_preview_order_changed()
+            if hasattr(self, "appearance_tab"):
+                self.appearance_tab.reset_to_defaults()
             self.chk_auto_sync.setChecked(True)
             self.chk_upload_audio.setChecked(False)
             self.chk_check_prereleases.setChecked(True)
@@ -1282,8 +1040,31 @@ class SettingsDialog(QDialog):
             "auto_check_updates_startup": self.chk_auto_check_startup.isChecked(),
         }
 
+        if hasattr(self, "appearance_tab"):
+            new_settings.update(self.appearance_tab.get_settings())
+
         success = save_user_settings(new_settings)
         if success:
+            target_theme = new_settings.get("theme", "classic_dark")
+            target_font_size = new_settings.get("font_size", 13)
+
+            current_preview_theme = getattr(self.appearance_tab, "_active_theme_id", None) if hasattr(self, "appearance_tab") else None
+            current_preview_font_size = getattr(self.appearance_tab, "_font_size", None) if hasattr(self, "appearance_tab") else None
+
+            if getattr(self, "_theme_previewed", False):
+                needs_apply = (target_theme != current_preview_theme or target_font_size != current_preview_font_size)
+            else:
+                needs_apply = (target_theme != getattr(self, "_initial_theme", None) or
+                               target_font_size != getattr(self, "_initial_font_size", None))
+
+            if needs_apply:
+                from recorder.ui.theme import apply_theme
+                apply_theme(
+                    QApplication.instance(),
+                    target_theme,
+                    font_size=target_font_size,
+                    hwnd=int(self.winId())
+                )
             self.settings_saved_signal.emit(new_settings)
             self.accept()
         else:
@@ -1299,16 +1080,6 @@ class UpdatePromptDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Aktualizacja Gotowa - Inteligentny Dyktafon AI")
         self.setMinimumWidth(480)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1a1a26;
-                border: 1px solid #3d405b;
-                border-radius: 10px;
-            }
-            QLabel {
-                color: #edf2f4;
-            }
-        """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
@@ -1324,9 +1095,9 @@ class UpdatePromptDialog(QDialog):
         text_layout = QVBoxLayout()
         text_layout.setSpacing(4)
         lbl_title = QLabel(f"Pobrano aktualizację <b>{version}</b>")
-        lbl_title.setStyleSheet("font-size: 15px; color: #4cc9f0; font-weight: bold;")
+        lbl_title.setStyleSheet("font-size: 15px; font-weight: bold;")
         lbl_sub = QLabel("Wybierz, w jaki sposób chcesz zastosować nową wersję programu:")
-        lbl_sub.setStyleSheet("font-size: 12px; color: #8d99ae;")
+        lbl_sub.setObjectName("LblSettingDesc")
         text_layout.addWidget(lbl_title)
         text_layout.addWidget(lbl_sub)
         header.addLayout(text_layout, stretch=1)
@@ -1335,60 +1106,19 @@ class UpdatePromptDialog(QDialog):
         # Przyciski ułożone pionowo – zero obcinania tekstu
         self.btn_restart_now = QPushButton("⚡  Zaktualizuj i zrestartuj teraz")
         self.btn_restart_now.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_restart_now.setStyleSheet("""
-            QPushButton {
-                background-color: #10b981;
-                color: #ffffff;
-                border: none;
-                border-radius: 7px;
-                padding: 12px 18px;
-                font-size: 13px;
-                font-weight: bold;
-                text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-        """)
+        self.btn_restart_now.setObjectName("BtnSave")
         self.btn_restart_now.clicked.connect(self._choose_restart_now)
         layout.addWidget(self.btn_restart_now)
 
         self.btn_on_exit = QPushButton("💤  Zainstaluj przy zamknięciu programu")
         self.btn_on_exit.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_on_exit.setStyleSheet("""
-            QPushButton {
-                background-color: #2b2d42;
-                color: #edf2f4;
-                border: 1px solid #3d405b;
-                border-radius: 7px;
-                padding: 12px 18px;
-                font-size: 13px;
-                font-weight: bold;
-                text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #3d405b;
-                border-color: #4cc9f0;
-            }
-        """)
+        self.btn_on_exit.setObjectName("BtnPreset")
         self.btn_on_exit.clicked.connect(self._choose_on_exit)
         layout.addWidget(self.btn_on_exit)
 
         self.btn_later = QPushButton("Później (anuluj na razie)")
         self.btn_later.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_later.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #8d99ae;
-                border: none;
-                padding: 8px 12px;
-                font-size: 11px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                color: #edf2f4;
-            }
-        """)
+        self.btn_later.setObjectName("BtnCancel")
         self.btn_later.clicked.connect(self.reject)
         layout.addWidget(self.btn_later)
 
