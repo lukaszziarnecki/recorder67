@@ -57,7 +57,7 @@ graph TD
   - Automatyczne domykanie i finalizacja spotkania po 15 min ciągłej ciszy.
   - Płynne otwieranie nowego pliku nagrania i nowej sesji w CRM bez konieczności ponownego ładowania modelu Whisper (0 ms opóźnienia).
 - [x] **Integracja Chmurowa i CRM (Cloud Sync)**:
-  - Asynchroniczny przesył segmentów na żywo do Supabase / Webhooka.
+  - Asynchroniczny przesył segmentów na żywo do Supabase / Webhooka z trwałymi identyfikatorami UUID, buforem ponawiania prób bez utraty danych i bezwzględną deduplikacją O(1).
   - Obsługa kolejki offline z automatycznym dosłaniem danych po powrocie internetu.
 - [x] **Separacja i Autosugestia Mówców (Diarization)**:
   - Integracja z `pyannote.audio` (model `speaker-diarization-3.1`) z możliwością uruchomienia wyłącznie diaryzacji na gotowych słowach sesji JSON bez ponownego uruchamiania Whispera.

@@ -61,7 +61,9 @@
     <Compile Include="recorder\ui\workers.py" />
     <Compile Include="scripts\build_exe.py" />
     <Compile Include="scripts\generate_icon.py" />
+    <Compile Include="tests\test_crm_live_sync_dedup.py" />
     <Compile Include="tests\test_live_streaming_sync.py" />
+    <Compile Include="tests\test_logging_and_diagnostics.py" />
     <Compile Include="tests\test_long_session_8h.py" />
     <Compile Include="tests\test_modular_diarization.py" />
     <Compile Include="tests\test_preview_order.py" />

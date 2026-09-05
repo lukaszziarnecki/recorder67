@@ -23,6 +23,7 @@
     <File Path="scripts/generate_icon.py" />
   </Folder>
   <Folder Name="/Elementy rozwiązania/tests/">
+    <File Path="tests/test_crm_live_sync_dedup.py" />
     <File Path="tests/test_live_streaming_sync.py" />
     <File Path="tests/test_logging_and_diagnostics.py" />
     <File Path="tests/test_long_session_8h.py" />
