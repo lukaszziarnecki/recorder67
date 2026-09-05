@@ -99,10 +99,12 @@ def get_turn_sync_id(turn: Dict[str, Any]) -> str:
     tid = turn.get("id") or turn.get("turn_id")
     if tid:
         return str(tid)
-    ch = str(turn.get("channel", "mic"))
-    st = round(float(turn.get("start", 0.0)), 2)
-    en = round(float(turn.get("end", 0.0)), 2)
-    txt = str(turn.get("text", "")).strip()
+    ch = str(turn.get("channel") or "mic")
+    st_val = turn.get("start")
+    en_val = turn.get("end")
+    st = round(float(st_val if st_val is not None else 0.0), 2)
+    en = round(float(en_val if en_val is not None else 0.0), 2)
+    txt = str(turn.get("text") or "").strip()
     return f"{ch}_{st}_{en}_{txt}"
 
 

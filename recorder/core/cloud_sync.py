@@ -319,10 +319,12 @@ class CloudSyncManager:
                 existing_ids = {s.get("id") for s in self._pending_live_segments if s.get("id")}
                 for s in new_segments:
                     sid = s.get("id")
-                    if not sid or sid not in existing_ids:
+                    if not sid:
+                        sid = str(uuid.uuid4())
+                        s["id"] = sid
+                    if sid not in existing_ids:
                         self._pending_live_segments.append(s)
-                        if sid:
-                            existing_ids.add(sid)
+                        existing_ids.add(sid)
             batch_to_send = list(self._pending_live_segments)
 
         headers = {
@@ -339,12 +341,14 @@ class CloudSyncManager:
         if batch_to_send:
             rows = []
             for s in batch_to_send:
+                st_val = s.get("start")
+                en_val = s.get("end")
                 row = {
                     "meeting_id": meeting_id,
-                    "speaker_name": s.get("speaker", "Mówca"),
-                    "start_time": float(s.get("start", 0.0)),
-                    "end_time": float(s.get("end", 0.0)),
-                    "text": str(s.get("text", "")).strip()
+                    "speaker_name": str(s.get("speaker") or "Mówca"),
+                    "start_time": float(st_val if st_val is not None else 0.0),
+                    "end_time": float(en_val if en_val is not None else 0.0),
+                    "text": str(s.get("text") or "").strip()
                 }
                 turn_id = s.get("id")
                 if turn_id:
@@ -389,7 +393,6 @@ class CloudSyncManager:
         should_patch_meeting = False
         with self._live_sync_lock:
             if duration_seconds >= self._latest_synced_duration:
-                self._latest_synced_duration = duration_seconds
                 should_patch_meeting = True
 
         if should_patch_meeting:
@@ -407,7 +410,10 @@ class CloudSyncManager:
                     method="PATCH"
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
-                    pass
+                    if resp.status in (200, 204):
+                        with self._live_sync_lock:
+                            if duration_seconds > self._latest_synced_duration:
+                                self._latest_synced_duration = duration_seconds
             except Exception as e:
                 logger.warning(f"[LIVE STREAM] Błąd PATCH spotkania meetings ({meeting_id}): {e}")
 
@@ -483,11 +489,13 @@ class CloudSyncManager:
         # Jeśli PATCH nie powiódł się, zapisz do kolejki offline
         segments = []
         for t in (turns or []):
+            st_val = t.get("start")
+            en_val = t.get("end")
             segments.append({
-                "speaker": t.get("speaker", "Mówca"),
-                "start": float(t.get("start", 0.0)),
-                "end": float(t.get("end", 0.0)),
-                "text": str(t.get("text", "")).strip()
+                "speaker": str(t.get("speaker") or "Mówca"),
+                "start": float(st_val if st_val is not None else 0.0),
+                "end": float(en_val if en_val is not None else 0.0),
+                "text": str(t.get("text") or "").strip()
             })
         full_payload = self._build_payload(
             meeting_id=meeting_id,
@@ -612,12 +620,14 @@ class CloudSyncManager:
         # 2. Wstaw nowe segmenty
         rows = []
         for s in segments:
+            st_val = s.get("start")
+            en_val = s.get("end")
             row = {
                 "meeting_id": meeting_id,
-                "speaker_name": s.get("speaker", "Mówca"),
-                "start_time": float(s.get("start", 0.0)),
-                "end_time": float(s.get("end", 0.0)),
-                "text": str(s.get("text", "")).strip()
+                "speaker_name": str(s.get("speaker") or "Mówca"),
+                "start_time": float(st_val if st_val is not None else 0.0),
+                "end_time": float(en_val if en_val is not None else 0.0),
+                "text": str(s.get("text") or "").strip()
             }
             turn_id = s.get("id")
             if turn_id:

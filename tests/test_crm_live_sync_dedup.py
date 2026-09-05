@@ -285,3 +285,74 @@ def test_save_segments_to_supabase_handles_sparse_keys():
         assert rows[2]["text"] == ""
         assert "resolution=merge-duplicates" in post_req.headers.get("Prefer", "")
 
+
+def test_get_turn_sync_id_and_cloud_sync_handle_explicit_none():
+    """
+    Weryfikuje, że słowniki zawierające jawne wartości None w polach (start, end, speaker, channel)
+    nie rzucają wyjątku TypeError ani w get_turn_sync_id, ani w metodach CloudSyncManager.
+    """
+    from recorder.core.cloud_sync import CloudSyncManager
+    import json
+
+    # 1. get_turn_sync_id z wartościami None
+    turn_none = {"id": None, "channel": None, "start": None, "end": None, "text": None}
+    res_id = get_turn_sync_id(turn_none)
+    assert res_id == "mic_0.0_0.0_"
+
+    # 2. _save_segments_to_supabase z wartościami None
+    manager = CloudSyncManager()
+    none_segments = [
+        {"id": None, "speaker": None, "start": None, "end": None, "text": None}
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status = 201
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+        manager._save_segments_to_supabase(
+            base_url="https://test.supabase.co",
+            headers={"apikey": "test"},
+            meeting_id="test-meet-id",
+            segments=none_segments
+        )
+        post_req = mock_urlopen.call_args_list[1][0][0]
+        rows = json.loads(post_req.data.decode("utf-8"))
+        assert rows[0]["speaker_name"] == "Mówca"
+        assert rows[0]["start_time"] == 0.0
+        assert rows[0]["end_time"] == 0.0
+        assert rows[0]["text"] == ""
+
+
+def test_append_live_segments_preserves_duration_monotonicity():
+    """
+    Weryfikuje, że opóźniony wątek sieciowy ze starszym czasem trwania (np. 5s)
+    nie nadpisze zaktualizowanego nagłówka o wyższym czasie trwania (np. 15s).
+    """
+    from recorder.core.cloud_sync import CloudSyncManager
+
+    manager = CloudSyncManager()
+    old_config = dict(manager.config)
+    try:
+        manager.config.update({
+            "sync_target": "emanager",
+            "supabase_url": "https://test.supabase.co",
+            "supabase_key": "test-anon-key"
+        })
+        with manager._live_sync_lock:
+            manager._pending_live_segments = []
+            manager._latest_synced_duration = 15.0
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            # Próba wysłania starszego nagłówka o duration 5.0 < 15.0
+            manager._append_live_segments_worker("test-meet-id", [], "Stary tekst", 5.0, 1)
+
+            # PATCH nie powinien zostać wywołany (tylko brak wywołań urlopen, bo batch pusty i duration mniejsze)
+            assert mock_urlopen.call_count == 0
+    finally:
+        manager.config = old_config
+
+
