@@ -99,21 +99,29 @@ def test_source_mode_labels_permutations(window):
                     f"lbl_app_input active mismatch for ({mic}, {sys_act}, {app_act})"
                 )
 
-    # Integration with RecordSourceMode
+    # Integracja z RecordSourceMode — przed każdą zmianą resetujemy do innego trybu,
+    # aby Qt zawsze emitował sygnał currentIndexChanged (Qt pomija sygnał gdy indeks
+    # nie zmienia się, co powodowało niestabilność przy izolowanym uruchamianiu testu).
+    hybrid_idx = window.combo_source_mode.findData(RecordSourceMode.HYBRID_DUAL)
+
+    window.combo_source_mode.setCurrentIndex(hybrid_idx)
     window.combo_source_mode.setCurrentIndex(window.combo_source_mode.findData(RecordSourceMode.MIC_ONLY))
     assert window.lbl_mic_input.property("active") == "true"
     assert window.lbl_sys_input.property("active") == "false"
     assert window.lbl_app_input.property("active") == "false"
 
+    window.combo_source_mode.setCurrentIndex(hybrid_idx)
     window.combo_source_mode.setCurrentIndex(window.combo_source_mode.findData(RecordSourceMode.SYSTEM_ONLY))
     assert window.lbl_mic_input.property("active") == "false"
     assert window.lbl_sys_input.property("active") == "true"
     assert window.lbl_app_input.property("active") == "true"
 
-    window.combo_source_mode.setCurrentIndex(window.combo_source_mode.findData(RecordSourceMode.HYBRID_DUAL))
+    window.combo_source_mode.setCurrentIndex(window.combo_source_mode.findData(RecordSourceMode.MIC_ONLY))
+    window.combo_source_mode.setCurrentIndex(hybrid_idx)
     assert window.lbl_mic_input.property("active") == "true"
     assert window.lbl_sys_input.property("active") == "true"
     assert window.lbl_app_input.property("active") == "true"
+
 
 
 def test_mute_btn_state_transitions(window):
