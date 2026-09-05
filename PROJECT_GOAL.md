@@ -79,6 +79,8 @@ graph TD
 - [x] **Bogaty Changelog Markdown & Przeglądarka Historii**: Obsługa pełnego formatowania CommonMark w oknie Ustawień, wielowersyjna agregacja pominiętych wydań, elastyczny scroll area i przeglądanie starszych wersji.
 - [x] **Wydanie Produkcyjne bez Konsoli & Centralne Bezpieczne Logowanie**: Aplikacja skompilowana z flagą `--noconsole`, automatyczne przechwytywanie strumieni stdout/stderr do rotującego pliku dziennika `logs/app.log` (do 60 MB) oraz 100% automatyczne maskowanie kluczy API, haseł i webhooków.
 - [x] **Budowanie wersji instalacyjnej**: Skrypty PyInstaller (`build_exe.ps1` i `scripts/build_exe.py`) do generowania gotowego pliku `.exe` pod Windows.
+- [x] **System Motywów Graficznych i Personalizacja UI**: Centralny silnik QSS z 4 kompletymi motywami (Classic Dark, Classic Light, EMANAGER Dark, EMANAGER Light), interaktywna zakładka „Wygląd & Personalizacja" z kartami podglądu na żywo, regulacja rozmiaru czcionki transkrypcji (11–17 px), dołączone fonty Saira (OFL) oraz natywna integracja z trybem ciemnym/jasnym paska tytułowego Windows (DWM). Drastyczna redukcja z 88 wywołań `setStyleSheet()` do 0 w module `window.py`.
+- [x] **Zaawansowane Zachowania Okna**: Przełącznik „Zawsze na wierzchu" (Always on Top), opcjonalna minimalizacja do zasobnika systemowego przy kliknięciu [X] z powiadomieniem balonowym (ochrona długich sesji), pamięć geometrii okna (rozmiar i pozycja) serializowana do `user_settings.json` z walidacją widoczności na ekranie.
 
 ---
 

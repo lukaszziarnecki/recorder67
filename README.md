@@ -23,6 +23,8 @@ Szczegółowy opis założeń architektonicznych, pamięci projektu oraz statusu
 * 🎙️ **Pętla Retry WASAPI dla Urządzeń Bluetooth:** Automatyczne wznawianie strumieni audio przy szybkim zatrzymaniu/wznowieniu nagrań, eliminujące błędy rozłączenia urządzeń bezprzewodowych.
 * 🚀 **Nowoczesny Auto-Updater (WinForms GUI) & Bogaty Changelog Markdown:** Graficzny pasek postępu instalacji aktualizacji w locie, obsługa pełnego formatowania Markdown w oknie Ustawień, automatyczna agregacja pominiętych wydań oraz przeglądarka historii wersji.
 * 🛡️ **Wydanie Produkcyjne bez Konsoli & Centralne Logowanie:** Aplikacja działa jako czyste okno Windows (`--noconsole`) z rotującym dziennikiem zdarzeń `logs/app.log` (do 60 MB) oraz 100% automatycznym maskowaniem danych poufnych (klucze API, hasła, webhooki).
+* 🎨 **System Motywów Graficznych i Personalizacja UI:** 4 kompletne motywy (Classic Dark, Classic Light, EMANAGER Dark, EMANAGER Light) z interaktywnymi kartami podglądu w zakładce „Wygląd & Personalizacja", regulacją rozmiaru czcionki transkrypcji oraz natywną integracją z trybem ciemnym/jasnym paska tytułowego Windows (DWM).
+* 📌 **Zaawansowane Zachowania Okna:** Przełącznik „Zawsze na wierzchu" (Always on Top), minimalizacja do zasobnika systemowego przy kliknięciu [X] (ochrona długich sesji nagraniowych) oraz pamięć rozmiaru i pozycji okna między uruchomieniami.
 
 ---
 
@@ -107,12 +109,14 @@ recorder67/
     │   ├── devices.py          # Wykrywanie i filtrowanie mikrofonów (DirectSound/WASAPI/MME)
     │   ├── converter.py        # Resampling do 16 kHz, filtry pasmowe i normalizacja
     │   └── capture.py          # Strumieniowy zapis WAV na dysku (StreamingWavWriter)
-    ├── resources/              # Zasoby aplikacji (oficjalna ikona app_icon.ico / app_icon.png)
+    ├── resources/              # Zasoby aplikacji (ikona app_icon.ico / .png, fonty Saira OFL)
     │
     └── ui/                     # Interfejs graficzny użytkownika (PySide6)
         ├── window.py           # Główne okno aplikacji (SmartDictaphoneWindow)
         ├── workers.py          # Wątki robocze audio i transkrypcji (QThread)
         ├── settings_dialog.py  # Okno ustawień słownika, parametrów VAD i podziału sesji
+        ├── appearance_tab.py   # Zakładka „Wygląd & Personalizacja" (motywy, czcionka, zachowania okna)
         ├── windows_integration.py # Tożsamość procesu Windows, AUMID i natywne toasty
-        └── theme.py            # Stylizacja Dark Theme (QSS i paleta)
+        └── theme.py            # Centralny silnik motywów QSS (4 motywy, fonty Saira, integracja DWM)
+
 ```
