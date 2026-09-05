@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from typing import Dict, Optional
 
 # Wyciszenie ostrzeżeń o symlinkach HuggingFace na Windowsie
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -17,7 +18,7 @@ os.makedirs(TRANSCRIPTIONS_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 # Wersja aplikacji i repozytorium GitHub
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.7.0"
 GITHUB_REPO = "igorkozielek/recorder67"
 
 # Parametry audio i VAD
@@ -224,6 +225,11 @@ def load_user_settings(force_reload: bool = False) -> dict:
         "check_prereleases": True,
         "auto_check_updates_startup": True,
         "adaptive_beam_size": False,
+        "theme": get_env_variable("APP_THEME", "classic_dark"),
+        "font_size": int(get_env_variable("TRANSCRIPT_FONT_SIZE", "13")),
+        "always_on_top": get_env_variable("ALWAYS_ON_TOP", "false").lower() in ("1", "true", "yes"),
+        "minimize_to_tray_on_close": get_env_variable("MINIMIZE_TO_TRAY_ON_CLOSE", "false").lower() in ("1", "true", "yes"),
+        "window_geometry": get_env_variable("WINDOW_GEOMETRY", ""),
     }
 
     settings_paths = [
@@ -381,6 +387,62 @@ def is_auto_scroll_chronological() -> bool:
     """Zwraca czy w trybie chronologicznym podgląd ma automatycznie przewijać do najnowszych wypowiedzi."""
     st = load_user_settings()
     return bool(st.get("auto_scroll_chronological", True))
+
+
+def get_theme() -> str:
+    """Zwraca aktywny identyfikator motywu (classic_dark, classic_light, emanager_dark, emanager_light)."""
+    st = load_user_settings()
+    return str(st.get("theme", "classic_dark")).strip() or "classic_dark"
+
+
+THEME_SPEAKER_COLORS: Dict[str, Dict[str, str]] = {
+    "classic_dark": {"mic": "#4cc9f0", "system": "#a370f7"},
+    "classic_light": {"mic": "#0369a1", "system": "#7c3aed"},
+    "emanager_dark": {"mic": "#ff6b6b", "system": "#38bdf8"},
+    "emanager_light": {"mic": "#b91c1c", "system": "#1d4ed8"},
+}
+
+
+def get_speaker_colors(theme_id: Optional[str] = None) -> Dict[str, str]:
+    if theme_id and theme_id in THEME_SPEAKER_COLORS:
+        return THEME_SPEAKER_COLORS[theme_id]
+    return THEME_SPEAKER_COLORS["classic_dark"]
+
+
+def get_font_size() -> int:
+    """Zwraca rozmiar czcionki podglądu transkrypcji (11-17 px)."""
+    st = load_user_settings()
+    try:
+        val = int(st.get("font_size", st.get("transcript_font_size", 13)))
+        return max(11, min(17, val))
+    except Exception:
+        return 13
+
+
+get_transcript_font_size = get_font_size
+
+
+def is_always_on_top() -> bool:
+    """Zwraca czy okno aplikacji powinno pozostawać zawsze na wierzchu."""
+    st = load_user_settings()
+    return bool(st.get("always_on_top", False))
+
+
+def is_minimize_to_tray_on_close() -> bool:
+    """Zwraca czy kliknięcie [X] minimalizuje okno do zasobnika systemowego."""
+    st = load_user_settings()
+    return bool(st.get("minimize_to_tray_on_close", False))
+
+
+def get_window_geometry() -> str:
+    """Zwraca zapisany stan geometrii okna (hex string) lub pusty ciąg."""
+    st = load_user_settings()
+    return str(st.get("window_geometry", "")).strip()
+
+
+def set_window_geometry(geom: str) -> bool:
+    """Zapisuje zakodowaną geometrię okna w user_settings.json."""
+    return save_user_settings({"window_geometry": str(geom).strip()})
 
 
 def get_default_beam_size() -> int:

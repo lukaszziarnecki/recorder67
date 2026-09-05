@@ -54,14 +54,18 @@
     <Compile Include="recorder\core\updater.py" />
     <Compile Include="recorder\core\vad.py" />
     <Compile Include="recorder\ui\__init__.py" />
+    <Compile Include="recorder\ui\appearance_tab.py" />
     <Compile Include="recorder\ui\settings_dialog.py" />
     <Compile Include="recorder\ui\theme.py" />
     <Compile Include="recorder\ui\window.py" />
     <Compile Include="recorder\ui\windows_integration.py" />
     <Compile Include="recorder\ui\workers.py" />
     <Compile Include="scripts\build_exe.py" />
+    <Compile Include="scripts\download_fonts.py" />
     <Compile Include="scripts\generate_icon.py" />
+    <Compile Include="scripts\verify_theme_benchmarks.py" />
     <Compile Include="tests\test_crm_live_sync_dedup.py" />
+    <Compile Include="tests\test_e2e_appearance.py" />
     <Compile Include="tests\test_live_streaming_sync.py" />
     <Compile Include="tests\test_logging_and_diagnostics.py" />
     <Compile Include="tests\test_long_session_8h.py" />
@@ -70,6 +74,13 @@
     <Compile Include="tests\test_rolling.py" />
     <Compile Include="tests\test_silence_alert.py" />
     <Compile Include="tests\test_speakers_dedup.py" />
+    <Compile Include="tests\test_theme_and_personalization.py" />
+    <Compile Include="tests\test_theme_core_decoupling.py" />
+    <Compile Include="tests\test_theme_performance.py" />
+    <Compile Include="tests\test_theme_stress.py" />
+    <Compile Include="tests\test_theme_tray_and_scroll.py" />
+    <Compile Include="tests\test_theme_window_layout.py" />
+    <Compile Include="tests\test_theme_window_stress.py" />
     <Compile Include="tests\test_updater.py" />
   </ItemGroup>
   <ItemGroup>

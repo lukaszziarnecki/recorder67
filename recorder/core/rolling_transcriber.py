@@ -4,7 +4,7 @@ import time
 import queue
 import uuid
 import numpy as np
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from PySide6.QtCore import QThread, Signal as pyqtSignal
 
@@ -17,8 +17,11 @@ from recorder.config import (
     DEFAULT_INITIAL_PROMPT,
     get_full_initial_prompt,
     get_beam_size,
-    is_adaptive_beam_size
+    is_adaptive_beam_size,
+    get_theme,
+    get_speaker_colors,
 )
+
 from recorder.audio.converter import highpass_filter_audio, normalize_audio
 
 
@@ -56,10 +59,15 @@ class RollingTranscriptionWorker(QThread):
     error_signal = pyqtSignal(str)
 
     def __init__(self, model_size: str = DEFAULT_WHISPER_MODEL, txt_save_path: Optional[str] = None,
-                 session_start_time: Optional[datetime] = None):
+                 session_start_time: Optional[Union[datetime, float, int]] = None):
         super().__init__()
         self.model_size = model_size
         self.txt_save_path = txt_save_path
+        if isinstance(session_start_time, (int, float)):
+            try:
+                session_start_time = datetime.fromtimestamp(session_start_time)
+            except Exception:
+                session_start_time = None
         self.session_start_time = session_start_time  # Realna godzina startu sesji (do timestampów z godziną)
         self.block_queue: queue.Queue = queue.Queue()
         self._is_running: bool = False
@@ -76,6 +84,15 @@ class RollingTranscriptionWorker(QThread):
         self._cached_plain: str = ""
         self._cached_session: Optional[Any] = None
 
+    @property
+    def completed_blocks(self) -> List[Dict[str, Any]]:
+        """Alias dla all_turns zapewniający pełną kompatybilność wsteczną."""
+        return self.all_turns
+
+    @completed_blocks.setter
+    def completed_blocks(self, value: List[Dict[str, Any]]):
+        self.all_turns = list(value or [])
+
     def add_block(self, block_index: int, start_sec: float, end_sec: float, audio_float: np.ndarray, channel_source: str = "mic"):
         """Dodaje nowy zamknięty blok audio do kolejki przetwarzania w tle z oznaczeniem źródła (mic / system)."""
         if self._is_running:
@@ -89,10 +106,15 @@ class RollingTranscriptionWorker(QThread):
             self.block_queue.put(block)
 
     def reset_for_new_session(self, new_txt_save_path: Optional[str] = None,
-                              session_start_time: Optional[datetime] = None):
+                              session_start_time: Optional[Union[datetime, float, int]] = None):
         """Resetuje stan przetworzonych bloków dla nowej sesji spotkania bez konieczności ponownego ładowania modelu Whisper."""
         self.txt_save_path = new_txt_save_path
         if session_start_time is not None:
+            if isinstance(session_start_time, (int, float)):
+                try:
+                    session_start_time = datetime.fromtimestamp(session_start_time)
+                except Exception:
+                    session_start_time = None
             self.session_start_time = session_start_time
         self.processed_blocks = []
         self.all_turns = []
@@ -379,8 +401,8 @@ class RollingTranscriptionWorker(QThread):
             full_html
         )
 
-    def _compile_full_transcript(self):
-        """Kompiluje dotychczasowe wypowiedzi w spójną transkrypcję posortowaną chronologicznie."""
+    def _compile_full_transcript(self, theme_id: Optional[str] = None):
+        """Kompiluje dotychczasowe wypowiedzi w spójną transkrypcję posortowaną chronologicznie z kolorami motywu."""
         from recorder.core.session import turn_sort_key
         combined_turns = sorted(list(self.all_turns), key=lambda t: turn_sort_key(t, self.session_start_time))
         if not combined_turns:
@@ -396,6 +418,12 @@ class RollingTranscriptionWorker(QThread):
 
         reverse_order = (get_preview_order() == "newest_first")
         ts_format = get_timestamp_format()
+
+        # O(1) pobranie mapowania kolorów mówców dla aktywnego motywu
+        active_theme = theme_id if theme_id is not None else get_theme()
+        spk_colors = get_speaker_colors(active_theme)
+        mic_color = spk_colors.get("mic", "#4cc9f0")
+        sys_color = spk_colors.get("system", "#a370f7")
 
         plain_parts = []
         for t in combined_turns:
@@ -423,10 +451,10 @@ class RollingTranscriptionWorker(QThread):
             time_label = format_turn_timestamp(st, en, self.session_start_time, ts_format=ts_format, wall_start=t.get("wall_start"), wall_end=t.get("wall_end"))
             if channel == "system":
                 badge = "🎧 "
-                color = "#a370f7"
+                color = sys_color
             else:
                 badge = "🎙️ "
-                color = "#4cc9f0"
+                color = mic_color
 
             display_spk = f"{badge}{spk}" if not (spk.startswith("🎙️") or spk.startswith("🎧")) else spk
             html_parts.append(f"<b>[{time_label}] <span style='color: {color};'>{display_spk}:</span></b> {txt}<br><br>")
@@ -475,3 +503,8 @@ class RollingTranscriptionWorker(QThread):
         except Exception as e:
             import logging
             logging.getLogger("recorder").warning(f"Błąd zapisu pliku sesji JSON '{json_path}': {e}")
+
+
+# Alias dla zachowania pełnej kompatybilności wstecznej i testów E2E
+RollingTranscriber = RollingTranscriptionWorker
+

@@ -20,10 +20,13 @@
   </Folder>
   <Folder Name="/Elementy rozwiązania/scripts/">
     <File Path="scripts/build_exe.py" />
+    <File Path="scripts/download_fonts.py" />
     <File Path="scripts/generate_icon.py" />
+    <File Path="scripts/verify_theme_benchmarks.py" />
   </Folder>
   <Folder Name="/Elementy rozwiązania/tests/">
     <File Path="tests/test_crm_live_sync_dedup.py" />
+    <File Path="tests/test_e2e_appearance.py" />
     <File Path="tests/test_live_streaming_sync.py" />
     <File Path="tests/test_logging_and_diagnostics.py" />
     <File Path="tests/test_long_session_8h.py" />
@@ -32,9 +35,17 @@
     <File Path="tests/test_rolling.py" />
     <File Path="tests/test_silence_alert.py" />
     <File Path="tests/test_speakers_dedup.py" />
+    <File Path="tests/test_theme_and_personalization.py" />
+    <File Path="tests/test_theme_core_decoupling.py" />
+    <File Path="tests/test_theme_performance.py" />
+    <File Path="tests/test_theme_stress.py" />
+    <File Path="tests/test_theme_tray_and_scroll.py" />
+    <File Path="tests/test_theme_window_layout.py" />
+    <File Path="tests/test_theme_window_stress.py" />
     <File Path="tests/test_updater.py" />
   </Folder>
   <Project Path="recorder/recorder.pyproj" Type="888888a0-9f3d-457c-b088-3a5042f75d52" Id="2fbdf51b-144e-45b3-83a6-930e9b627a4d">
     <Build Project="false" />
   </Project>
 </Solution>
+

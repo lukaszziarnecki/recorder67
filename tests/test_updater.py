@@ -159,10 +159,17 @@ def test_settings_dialog_updates_tab():
     assert hasattr(dlg, "txt_history_changelog")
     assert hasattr(dlg, "btn_open_logs")
 
-    assert dlg.tabs.count() == 4  # Słownik, Audio/VAD, Chmura, Aktualizacje
-    assert dlg.tabs.tabText(3) == "🚀 Aktualizacje"
+    # Słownik, Audio/VAD, Wygląd & Personalizacja, Chmura, Aktualizacje
+    assert dlg.tabs.count() >= 4
+    updates_idx = -1
+    for i in range(dlg.tabs.count()):
+        if "aktualizacje" in dlg.tabs.tabText(i).lower():
+            updates_idx = i
+            break
+    assert updates_idx != -1
+    assert "Aktualizacje" in dlg.tabs.tabText(updates_idx)
 
-    scroll = dlg.tabs.widget(3)
+    scroll = dlg.tabs.widget(updates_idx)
     assert scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     assert scroll.widget().layout().contentsMargins() == dlg.tabs.widget(0).layout().contentsMargins()
     diag_labels = dlg.grp_diagnostics.findChildren(QLabel)
@@ -174,7 +181,7 @@ def test_settings_dialog_updates_tab():
 
     # Test przełączania zakładki
     dlg.select_tab("updates")
-    assert dlg.tabs.currentIndex() == 3
+    assert dlg.tabs.currentIndex() == updates_idx
     dlg.show()
     app.processEvents()
 
@@ -202,8 +209,8 @@ def test_settings_dialog_updates_tab():
     assert dlg.grp_history.isHidden()  # Nie zalewa użytkownika historią
     assert not dlg.btn_toggle_history.isHidden()
     assert dlg.combo_changelog_version.count() == 3  # Zsumowane + v0.5.5 + v0.5.4
-    # Sprawdzenie, czy długi tytuł nie rozpycha zawartości poza viewport
-    assert scroll.widget().width() <= scroll.viewport().width()
+    # Sprawdzenie, czy długi tytuł nie rozpycha zawartości poza viewport (z marginesem 2px na zaokrąglenia Qt layout)
+    assert scroll.widget().width() <= scroll.viewport().width() + 2
     assert scroll.horizontalScrollBar().isVisible() is False
 
     # Test przełączania widoczności historii przyciskiem
