@@ -170,6 +170,25 @@ def main():
     # Połącz moduły AI oraz moduły z site-packages
     modules_to_collect = sorted(list(set([pkg for pkg in core_ai_collect if _is_module_available(pkg.split('.')[0])])))
 
+    # Weryfikacja obecności zasobów czcionek (Saira SIL OFL)
+    fonts_dir = os.path.join(ROOT_DIR, "recorder", "resources", "fonts")
+    has_fonts = False
+    if os.path.isdir(fonts_dir):
+        font_files = [f for f in os.listdir(fonts_dir) if f.lower().endswith((".ttf", ".otf"))]
+        if font_files:
+            has_fonts = True
+            print(f"🔤 Znaleziono pakiet czcionek: {fonts_dir} ({len(font_files)} plików: {', '.join(font_files)})")
+
+    if not has_fonts:
+        print("⚠️ Brak plików czcionek w recorder/resources/fonts! Próba automatycznego pobrania...")
+        try:
+            download_script = os.path.join(ROOT_DIR, "scripts", "download_fonts.py")
+            if os.path.exists(download_script):
+                subprocess.run([sys.executable, download_script], check=True, cwd=ROOT_DIR)
+                print("✅ Automatycznie pobrano brakujące czcionki Saira.")
+        except Exception as e:
+            print(f"⚠️ Nie udało się automatycznie pobrać czcionek: {e}")
+
     # 4. Przygotuj parametry PyInstallera
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -222,9 +241,10 @@ def main():
         # Bezpieczne dołączenie pliku przykładowego .env.example (zamiast prywatnego .env)
         f"--add-data={os.path.join(ROOT_DIR, '.env.example')};." if os.path.exists(os.path.join(ROOT_DIR, '.env.example')) else "",
 
-        # Dołączenie oficjalnej ikony i zasobów aplikacji
+        # Dołączenie oficjalnej ikony i zasobów aplikacji (w tym czcionek Saira w recorder/resources/fonts/)
         f"--icon={os.path.join(ROOT_DIR, 'recorder', 'resources', 'app_icon.ico')}" if os.path.exists(os.path.join(ROOT_DIR, 'recorder', 'resources', 'app_icon.ico')) else "",
         f"--add-data={os.path.join(ROOT_DIR, 'recorder', 'resources')};recorder/resources" if os.path.exists(os.path.join(ROOT_DIR, 'recorder', 'resources')) else "",
+        f"--add-data={os.path.join(ROOT_DIR, 'recorder', 'resources', 'fonts')};recorder/resources/fonts" if os.path.exists(os.path.join(ROOT_DIR, 'recorder', 'resources', 'fonts')) else "",
         
         ENTRY_POINT
     ]

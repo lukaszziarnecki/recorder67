@@ -89,6 +89,14 @@ def generate_official_icon(output_dir: str = None):
     bracket.arcMoveTo(QRectF(78, 80, 100, 95), 0)
     bracket.arcTo(QRectF(78, 80, 100, 95), 0, -180)
 
+    # Kontrastowa ciemna obwódka (outline) dla czytelności na jasnym tle (WCAG 2.1 3:1+)
+    pen_outline = QPen(QColor("#0c0e12"), 12.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    p.setPen(pen_outline)
+    p.drawPath(bracket)
+    p.drawLine(QPointF(128, 175), QPointF(128, 210))
+    p.drawLine(QPointF(100, 210), QPointF(156, 210))
+
+    # Wewnętrzny srebrny stojak mikrofonu (#f1f5f9)
     pen_b = QPen(QColor("#f1f5f9"), 8.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
     p.setPen(pen_b)
     p.drawPath(bracket)
