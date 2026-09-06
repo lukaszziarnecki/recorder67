@@ -31,15 +31,6 @@ except ImportError:
 from recorder.ui import theme
 
 
-@pytest.fixture(scope="session")
-def qapp():
-    """Provides a headless QApplication instance."""
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
 # ==============================================================================
 # 1. THEME REGISTRY & DEFINITION INTEGRITY TESTS
 # ==============================================================================

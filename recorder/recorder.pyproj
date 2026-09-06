@@ -64,6 +64,7 @@
     <Compile Include="scripts\download_fonts.py" />
     <Compile Include="scripts\generate_icon.py" />
     <Compile Include="scripts\verify_theme_benchmarks.py" />
+    <Compile Include="tests\conftest.py" />
     <Compile Include="tests\test_crm_live_sync_dedup.py" />
     <Compile Include="tests\test_e2e_appearance.py" />
     <Compile Include="tests\test_live_streaming_sync.py" />

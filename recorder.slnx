@@ -25,6 +25,7 @@
     <File Path="scripts/verify_theme_benchmarks.py" />
   </Folder>
   <Folder Name="/Elementy rozwiązania/tests/">
+    <File Path="tests/conftest.py" />
     <File Path="tests/test_crm_live_sync_dedup.py" />
     <File Path="tests/test_e2e_appearance.py" />
     <File Path="tests/test_live_streaming_sync.py" />

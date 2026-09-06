@@ -140,9 +140,9 @@ def test_generate_updater_scripts():
     print("  -> Skrypty instalatora PowerShell z GUI WinForms wygenerowane poprawnie!")
 
 
-def test_settings_dialog_updates_tab():
+def test_settings_dialog_updates_tab(qapp):
     print("[TEST] Test integracji SettingsDialog (brak NameError, zakładka aktualizacji)...")
-    app = QApplication.instance() or QApplication([])
+    app = qapp
     dlg = SettingsDialog()
     assert hasattr(dlg, "btn_check_updates")
     assert hasattr(dlg, "chk_check_prereleases")
@@ -235,6 +235,8 @@ def test_settings_dialog_updates_tab():
     assert dlg.combo_history_version.count() == 2
 
     dlg.close()
+    dlg.deleteLater()
+    app.processEvents()
     print("  -> Zakładka Aktualizacje w SettingsDialog z Markdownem i historią przetestowana pomyślnie!")
 
 
@@ -280,9 +282,9 @@ def test_sanitize_changelog_markdown_fixes_urls_and_strips_css():
     print("  -> Sanitaryzacja i naprawa linków compare działa perfekcyjnie!")
 
 
-def test_markdown_changelog_browser_copy_and_link_rendering():
+def test_markdown_changelog_browser_copy_and_link_rendering(qapp):
     print("[TEST] Weryfikacja renderowania linku compare i bezpiecznego kopiowania bez CSS...")
-    app = QApplication.instance() or QApplication([])
+    app = qapp
     browser = MarkdownChangelogBrowser()
 
     # Weryfikacja renderowania linku compare – cały adres (łącznie z ...v0.5.5) musi trafić do href
@@ -323,16 +325,27 @@ def test_markdown_changelog_browser_copy_and_link_rendering():
             assert "white-space: pre-wrap" not in cb_menu.html()
         assert "https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5" in cb_menu.text()
 
+    # Czyszczenie zasobów Qt
+    browser.deleteLater()
+    if menu is not None:
+        menu.deleteLater()
+    if cb is not None:
+        cb.clear()
+    app.processEvents()
+
     print("  -> MarkdownChangelogBrowser prawidłowo tworzy linki i czyści schowek ze styli CSS we wszystkich trybach (Ctrl+C, Menu, copy())!")
 
 
 if __name__ == "__main__":
+    _app = QApplication.instance() or QApplication([])
+    from recorder.ui import theme
+    theme.apply_theme(_app, "classic_dark")
     test_semver_parsing()
     test_version_comparisons()
     test_github_api_check()
     test_multi_version_changelog_aggregation()
     test_generate_updater_scripts()
-    test_settings_dialog_updates_tab()
+    test_settings_dialog_updates_tab(_app)
     test_sanitize_changelog_markdown_fixes_urls_and_strips_css()
-    test_markdown_changelog_browser_copy_and_link_rendering()
+    test_markdown_changelog_browser_copy_and_link_rendering(_app)
     print("\n[OK] Wszystkie testy modulu Auto-Updatera zakonczone sukcesem!")

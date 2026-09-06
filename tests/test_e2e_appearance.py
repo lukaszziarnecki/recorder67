@@ -46,15 +46,6 @@ except ImportError:
 # Fixtures & Test Isolation
 # ==============================================================================
 
-@pytest.fixture(scope="session")
-def qapp():
-    """Provides a headless QApplication instance for Qt-dependent tests."""
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
 @pytest.fixture
 def isolated_settings(tmp_path, monkeypatch):
     """

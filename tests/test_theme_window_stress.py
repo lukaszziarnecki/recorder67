@@ -34,22 +34,16 @@ from recorder.ui import theme
 from recorder.config import RecordSourceMode
 
 
-@pytest.fixture(scope="session")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
 @pytest.fixture
 def window(qapp, monkeypatch):
     """Instantiates SmartDictaphoneWindow in headless mode with worker stopped."""
     win = SmartDictaphoneWindow()
     yield win
     try:
+        win._force_quit = True
         win.close()
         win.deleteLater()
+        qapp.processEvents()
     except Exception:
         pass
 

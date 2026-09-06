@@ -39,14 +39,6 @@ from recorder.ui.settings_dialog import SettingsDialog
 from recorder.config import RecordSourceMode, save_user_settings
 
 
-@pytest.fixture(scope="session")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
 @pytest.fixture
 def isolated_settings(tmp_path, monkeypatch):
     from recorder import config
