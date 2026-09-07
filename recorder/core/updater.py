@@ -80,7 +80,9 @@ def is_newer_version(remote_tag: str, local_version: str = APP_VERSION) -> bool:
 def fetch_all_releases(
     repo: str = GITHUB_REPO,
     include_prereleases: bool = True,
-    timeout: int = 8
+    timeout: int = 8,
+    token: Optional[str] = None,
+    raise_for_error: bool = False
 ) -> list[Dict[str, Any]]:
     """
     Pobiera pełną listę wydań z API GitHuba (posortowaną od najnowszych).
@@ -91,6 +93,9 @@ def fetch_all_releases(
         "User-Agent": f"Recorder67-App/{APP_VERSION}",
         "Accept": "application/vnd.github.v3+json"
     }
+    github_token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
 
     req = urllib.request.Request(url, headers=headers)
     releases = []
@@ -138,6 +143,8 @@ def fetch_all_releases(
                 })
     except Exception as err:
         print(f"[UPDATER] Błąd pobierania listy wydań GitHub: {err}")
+        if raise_for_error:
+            raise
 
     return releases
 
@@ -267,7 +274,10 @@ class CheckUpdateWorker(QThread):
 
     def run(self):
         try:
-            all_releases = fetch_all_releases(include_prereleases=self.include_prereleases)
+            all_releases = fetch_all_releases(
+                include_prereleases=self.include_prereleases,
+                raise_for_error=True
+            )
             res = check_github_updates(
                 include_prereleases=self.include_prereleases,
                 all_releases=all_releases
@@ -312,6 +322,9 @@ class DownloadUpdateWorker(QThread):
         try:
             self.progress_signal.emit(5, "Nawiązywanie połączenia z serwerem wydań GitHub...")
             headers = {"User-Agent": f"Recorder67-App/{APP_VERSION}"}
+            token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
             req = urllib.request.Request(self.download_url, headers=headers)
             
             with urllib.request.urlopen(req, timeout=30) as response:

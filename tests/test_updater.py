@@ -243,37 +243,37 @@ def test_settings_dialog_updates_tab(qapp):
 def test_sanitize_changelog_markdown_fixes_urls_and_strips_css():
     print("[TEST] Weryfikacja naprawy linków compare i usuwania wycieków CSS w changelogu...")
     # 1. Usuwanie wycieku styli CSS Qt oraz bloków <style>
-    css_leak = 'p, li { white-space: pre-wrap; } hr { height: 1px; border-width: 0; } li.unchecked::marker { content: "\\2610"; } li.checked::marker { content: "\\2612"; } Pełna lista zmian: https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5'
+    css_leak = 'p, li { white-space: pre-wrap; } hr { height: 1px; border-width: 0; } li.unchecked::marker { content: "\\2610"; } li.checked::marker { content: "\\2612"; } Pełna lista zmian: https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5'
     sanitized_css = sanitize_changelog_markdown(css_leak)
     assert "white-space: pre-wrap" not in sanitized_css
     assert "unchecked::marker" not in sanitized_css
-    assert "<https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5>" in sanitized_css
+    assert "<https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5>" in sanitized_css
 
     style_tag_leak = '<style type="text/css">p { margin: 0; }</style>Czysty opis zmian.'
     assert sanitize_changelog_markdown(style_tag_leak) == "Czysty opis zmian."
 
     # 2. Naprawa urwanego linku markdown [url/v0.5.4](url/v0.5.4)...v0.5.5
-    broken_md = "Pełna lista zmian: [https://github.com/igorkozielek/recorder67/compare/v0.5.4](https://github.com/igorkozielek/recorder67/compare/v0.5.4)...v0.5.5"
+    broken_md = "Pełna lista zmian: [https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4](https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4)...v0.5.5"
     repaired_md = sanitize_changelog_markdown(broken_md)
-    assert "<https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5>" in repaired_md
+    assert "<https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5>" in repaired_md
     assert "...v0.5.5]" not in repaired_md
 
     # 3. Opakowanie surowego adresu URL compare w nawiasy ostrokątne <...>
-    bare_url = "**Pełna lista zmian:** https://github.com/igorkozielek/recorder67/compare/v0.5.3...v0.5.4"
+    bare_url = "**Pełna lista zmian:** https://github.com/lukaszziarnecki/recorder67/compare/v0.5.3...v0.5.4"
     wrapped_url = sanitize_changelog_markdown(bare_url)
-    assert "<https://github.com/igorkozielek/recorder67/compare/v0.5.3...v0.5.4>" in wrapped_url
+    assert "<https://github.com/lukaszziarnecki/recorder67/compare/v0.5.3...v0.5.4>" in wrapped_url
 
     # 4. Obsługa interpunkcji na końcu zdania (kropka, przecinek) - nie mogą trafić do wnętrza linku!
-    dot_sentence = "Zobacz https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5."
+    dot_sentence = "Zobacz https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5."
     sanitized_dot = sanitize_changelog_markdown(dot_sentence)
-    assert sanitized_dot == "Zobacz <https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5>."
+    assert sanitized_dot == "Zobacz <https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5>."
 
-    comma_sentence = "Link https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5, zapraszamy!"
+    comma_sentence = "Link https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5, zapraszamy!"
     sanitized_comma = sanitize_changelog_markdown(comma_sentence)
-    assert sanitized_comma == "Link <https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5>, zapraszamy!"
+    assert sanitized_comma == "Link <https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5>, zapraszamy!"
 
     # 5. Brak wielokrotnego opakowywania już poprawnych linków
-    already_valid = "<https://github.com/igorkozielek/recorder67/compare/v0.5.3...v0.5.4>"
+    already_valid = "<https://github.com/lukaszziarnecki/recorder67/compare/v0.5.3...v0.5.4>"
     assert sanitize_changelog_markdown(already_valid) == already_valid
 
     # 6. Przypadki brzegowe (None, pusty string)
@@ -288,10 +288,10 @@ def test_markdown_changelog_browser_copy_and_link_rendering(qapp):
     browser = MarkdownChangelogBrowser()
 
     # Weryfikacja renderowania linku compare – cały adres (łącznie z ...v0.5.5) musi trafić do href
-    test_md = "Pełna lista zmian: https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5"
+    test_md = "Pełna lista zmian: https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5"
     browser.setMarkdown(test_md)
     html = browser.toHtml()
-    assert 'href="https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5"' in html
+    assert 'href="https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5"' in html
 
     # Weryfikacja kopiowania zaznaczenia metodą copy() – schowek NIE może zawierać bloku <style>...</style>
     browser.selectAll()
@@ -303,7 +303,7 @@ def test_markdown_changelog_browser_copy_and_link_rendering(qapp):
         assert "<style" not in cb_html
         assert "white-space: pre-wrap" not in cb_html
     cb_text = mime.text()
-    assert "https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5" in cb_text
+    assert "https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5" in cb_text
 
     # Weryfikacja kopiowania skrótem klawiszowym Ctrl+C
     key_event = QKeyEvent(QEvent.KeyPress, Qt.Key_C, Qt.ControlModifier)
@@ -312,7 +312,7 @@ def test_markdown_changelog_browser_copy_and_link_rendering(qapp):
     if cb_ctrl_c.hasHtml():
         assert "<style" not in cb_ctrl_c.html()
         assert "white-space: pre-wrap" not in cb_ctrl_c.html()
-    assert "https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5" in cb_ctrl_c.text()
+    assert "https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5" in cb_ctrl_c.text()
 
     # Weryfikacja kopiowania z menu kontekstowego
     menu = browser.createStandardContextMenu()
@@ -323,7 +323,7 @@ def test_markdown_changelog_browser_copy_and_link_rendering(qapp):
         if cb_menu.hasHtml():
             assert "<style" not in cb_menu.html()
             assert "white-space: pre-wrap" not in cb_menu.html()
-        assert "https://github.com/igorkozielek/recorder67/compare/v0.5.4...v0.5.5" in cb_menu.text()
+        assert "https://github.com/lukaszziarnecki/recorder67/compare/v0.5.4...v0.5.5" in cb_menu.text()
 
     # Czyszczenie zasobów Qt
     browser.deleteLater()
