@@ -1139,16 +1139,19 @@ class SmartDictaphoneWindow(QMainWindow):
             self.lbl_vad_detail.style().polish(self.lbl_vad_detail)
 
     def _refresh_microphones(self):
-        """Odświeża wyłącznie listę mikrofonów wejściowych."""
+        """Odświeża wyłącznie listę mikrofonów wejściowych (zdeduplikowanych, z priorytetem WASAPI)."""
         current_data = self.combo_devices.currentData()
         self.combo_devices.clear()
         devices = get_working_input_devices(force_refresh=False)
         if devices:
             default_idx = 0
             for i, dev in enumerate(devices):
-                label = f"{dev['name']} ({dev['hostapi']})"
+                label = dev.get('label') or f"🎤 {dev['name']}"
                 self.combo_devices.addItem(label, userData=dev['index'])
-                if current_data is not None and dev['index'] == current_data:
+                if current_data is not None:
+                    if dev['index'] == current_data or current_data in dev.get('fallback_indices', []):
+                        default_idx = i
+                elif dev.get('is_default') and current_data is None:
                     default_idx = i
             self.combo_devices.setCurrentIndex(default_idx)
         else:

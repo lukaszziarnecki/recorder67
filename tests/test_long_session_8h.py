@@ -732,6 +732,233 @@ def test_smart_audio_worker_device_retry_and_error_handling():
     assert worker_fail._is_running is False
 
 
+def test_get_working_input_devices_deduplication_and_wasapi_priority():
+    """
+    Weryfikuje, że get_working_input_devices():
+    1. Deduplikuje ten sam fizyczny mikrofon występujący na wielu host API (MME, DirectSound, WASAPI).
+    2. Odrzuca sztuczne aliasy maperów Windows ('Mapowanie dźwięku Microsoft', 'Podstawowy sterownik...').
+    3. Przypisuje indeks WASAPI jako primary, a DirectSound i MME jako fallback_indices.
+    4. Oznacza domyślny mikrofon systemowy jako is_default=True i umieszcza go na samej górze.
+    5. Formatuje czytelną etykietę bez technicznego żargonu w UI.
+    """
+    from recorder.audio.devices import get_working_input_devices
+    from unittest.mock import MagicMock, patch
+
+    mock_p = MagicMock()
+    mock_p.get_host_api_count.return_value = 3
+    mock_p.get_host_api_info_by_index.side_effect = lambda idx: {
+        0: {"index": 0, "name": "MME"},
+        1: {"index": 1, "name": "Windows DirectSound"},
+        2: {"index": 2, "name": "Windows WASAPI", "defaultInputDevice": 9},
+    }[idx]
+    mock_p.get_default_input_device_info.return_value = {"index": 1}
+
+    mock_devices = [
+        {"index": 0, "name": "Mapowanie dźwięku Microsoft - Input", "hostApi": 0, "maxInputChannels": 2, "defaultSampleRate": 44100, "isLoopbackDevice": False},
+        {"index": 1, "name": "Mikrofon (Wireless microphone)", "hostApi": 0, "maxInputChannels": 2, "defaultSampleRate": 44100, "isLoopbackDevice": False},
+        {"index": 4, "name": "Podstawowy sterownik przechwytywania dźwięku", "hostApi": 1, "maxInputChannels": 2, "defaultSampleRate": 44100, "isLoopbackDevice": False},
+        {"index": 5, "name": "Mikrofon (Wireless microphone)", "hostApi": 1, "maxInputChannels": 2, "defaultSampleRate": 44100, "isLoopbackDevice": False},
+        {"index": 9, "name": "Mikrofon (Wireless microphone)", "hostApi": 2, "maxInputChannels": 2, "defaultSampleRate": 48000, "isLoopbackDevice": False},
+        {"index": 12, "name": "Mikrofon (Realtek High Definition)", "hostApi": 0, "maxInputChannels": 2, "defaultSampleRate": 44100, "isLoopbackDevice": False},
+    ]
+    mock_p.get_device_count.return_value = len(mock_devices)
+    mock_p.get_device_info_by_index.side_effect = lambda idx: mock_devices[idx] if idx < len(mock_devices) else mock_devices[0]
+
+    with patch("recorder.audio.devices.pyaudio.PyAudio", return_value=mock_p):
+        devices = get_working_input_devices()
+
+    # Powinny być dokładnie 2 fizyczne mikrofony (Wireless microphone i Realtek) zamiast 6 wpisów z maperami
+    assert len(devices) == 2, f"Oczekiwano 2 zdeduplikowanych mikrofonów, otrzymano {len(devices)}"
+
+    # Pierwszy powinien być domyślny Wireless microphone z indeksem WASAPI (9)
+    first = devices[0]
+    assert first["name"] == "Mikrofon (Wireless microphone)"
+    assert first["index"] == 9, "Główny indeks powinien wskazywać na WASAPI (9)"
+    assert first["hostapi"] == "Windows WASAPI"
+    assert first["is_default"] is True
+    assert "Domyślne" in first["label"]
+    assert 5 in first["fallback_indices"], "Fallback powinien zawierać DirectSound (5)"
+    assert 1 in first["fallback_indices"], "Fallback powinien zawierać MME (1)"
+
+    # Drugi to Realtek
+    second = devices[1]
+    assert second["name"] == "Mikrofon (Realtek High Definition)"
+    assert second["is_default"] is False
+
+
+def test_smart_audio_worker_watchdog_recovers_inactive_stream():
+    """
+    Weryfikuje, że w przypadku utraty aktywności strumienia (is_active() == False na skutek paAbort/błędu),
+    Watchdog nie wpada w martwą pętlę start_stream(), lecz zamyka stary strumień i otwiera nowy sprawny obiekt.
+    """
+    from recorder.ui.workers import SmartAudioWorker, RecordSourceMode, SmartRecordState
+    from unittest.mock import MagicMock, patch
+    from PySide6.QtWidgets import QApplication
+
+    _ = QApplication.instance() or QApplication([])
+
+    worker = SmartAudioWorker()
+    worker.source_mode = RecordSourceMode.MIC_ONLY
+    worker._is_running = True
+    worker.state = SmartRecordState.RECORDING_SPEECH
+
+    mock_pyaudio = MagicMock()
+    mock_pyaudio.get_device_count.return_value = 1
+    mock_dev_info = {"index": 9, "name": "Mikrofon (Wireless microphone)", "defaultSampleRate": 48000, "maxInputChannels": 2, "isLoopbackDevice": False}
+    mock_pyaudio.get_device_info_by_index.return_value = mock_dev_info
+
+    stream1 = MagicMock()
+    stream1.is_active.return_value = True
+
+    stream2 = MagicMock()
+    stream2.is_active.return_value = True
+
+    open_calls = []
+    def mock_open(**kwargs):
+        if not open_calls:
+            open_calls.append("stream1")
+            return stream1
+        open_calls.append("stream2")
+        return stream2
+
+    mock_pyaudio.open.side_effect = mock_open
+
+    # W pętli po 1 ticku zmieniamy stream1.is_active() na False, aby Watchdog musiał zrestartować strumień
+    simulated_time = [100.0]
+    ticks = 0
+
+    def mock_time():
+        return simulated_time[0]
+
+    def mock_msleep(ms):
+        nonlocal ticks
+        ticks += 1
+        if ticks == 1:
+            # Symulacja zatrzymania strumienia przez sterownik i upływu czasu
+            stream1.is_active.return_value = False
+            simulated_time[0] += 2.0  # Watchdog sprawdza co 1.5s
+        elif ticks >= 3:
+            worker._is_running = False
+
+    with patch("recorder.ui.workers.pyaudio.PyAudio", return_value=mock_pyaudio), \
+         patch("time.time", side_effect=mock_time), \
+         patch("time.sleep", return_value=None):
+        with patch.object(worker, "msleep", side_effect=mock_msleep):
+            worker.device_index = 9
+            worker.run()
+
+    # Stream1 powinien zostać zamknięty, a stream2 otwarty przez Watchdog
+    assert len(open_calls) >= 2, f"Oczekiwano restartu strumienia przez Watchdog, otwarto {len(open_calls)} razy"
+    stream1.close.assert_called()
+    assert stream2.start_stream.called
+
+
+def test_smart_audio_worker_watchdog_detects_buffer_stall():
+    """
+    Weryfikuje, że gdy strumień formalnie zwraca is_active() == True, ale dane audio nie przychodzą
+    przez ponad 4 sekundy (zamrożenie sterownika USB), Watchdog wykrywa stagnację i resetuje strumień.
+    """
+    from recorder.ui.workers import SmartAudioWorker, RecordSourceMode, SmartRecordState
+    from unittest.mock import MagicMock, patch
+    from PySide6.QtWidgets import QApplication
+
+    _ = QApplication.instance() or QApplication([])
+
+    worker = SmartAudioWorker()
+    worker.source_mode = RecordSourceMode.MIC_ONLY
+    worker._is_running = True
+    worker.state = SmartRecordState.RECORDING_SPEECH
+
+    mock_pyaudio = MagicMock()
+    mock_pyaudio.get_device_count.return_value = 1
+    mock_dev_info = {"index": 9, "name": "Mikrofon (Wireless microphone)", "defaultSampleRate": 48000, "maxInputChannels": 2, "isLoopbackDevice": False}
+    mock_pyaudio.get_device_info_by_index.return_value = mock_dev_info
+
+    stream1 = MagicMock()
+    stream1.is_active.return_value = True
+
+    stream2 = MagicMock()
+    stream2.is_active.return_value = True
+
+    open_calls = []
+    def mock_open(**kwargs):
+        if not open_calls:
+            open_calls.append("stream1")
+            return stream1
+        open_calls.append("stream2")
+        return stream2
+
+    mock_pyaudio.open.side_effect = mock_open
+
+    # Symulacja upływu czasu: najpierw t=0, a po pierwszym ticku skok czasu o 5 sekund bez wywołania callbacku
+    simulated_time = [100.0]
+    ticks = 0
+
+    def mock_time():
+        return simulated_time[0]
+
+    def mock_msleep(ms):
+        nonlocal ticks
+        ticks += 1
+        if ticks == 1:
+            simulated_time[0] += 5.0  # Skok o 5 sekund (stagnacja bufora > 4s)
+        elif ticks >= 3:
+            worker._is_running = False
+
+    with patch("recorder.ui.workers.pyaudio.PyAudio", return_value=mock_pyaudio), \
+         patch("time.time", side_effect=mock_time), \
+         patch("time.sleep", return_value=None):
+        with patch.object(worker, "msleep", side_effect=mock_msleep):
+            worker.device_index = 9
+            worker.run()
+
+    # Stagnacja bufora powinna doprowadzić do wywołania _reopen_mic_stream() i otwarcia stream2
+    assert len(open_calls) >= 2, f"Oczekiwano restartu po stagnacji bufora, otwarto {len(open_calls)} razy"
+    stream1.close.assert_called()
+
+
+def test_smart_audio_worker_initial_fallback_candidate():
+    """
+    Weryfikuje, że gdy podczas startu otwarcie wybranego indeksu urządzenia (np. WASAPI) rzuci błąd,
+    SmartAudioWorker automatycznie próbuje wariantów fallback (DirectSound/MME) tego samego mikrofonu.
+    """
+    from recorder.ui.workers import SmartAudioWorker, RecordSourceMode
+    from unittest.mock import MagicMock, patch
+    from PySide6.QtWidgets import QApplication
+
+    _ = QApplication.instance() or QApplication([])
+
+    worker = SmartAudioWorker()
+    worker.source_mode = RecordSourceMode.MIC_ONLY
+    worker._is_running = True
+
+    mock_pyaudio = MagicMock()
+    mock_pyaudio.get_device_count.return_value = 2
+    dev_wasapi = {"index": 9, "name": "Mikrofon (Wireless microphone)", "defaultSampleRate": 48000, "maxInputChannels": 2, "isLoopbackDevice": False}
+    dev_mme = {"index": 1, "name": "Mikrofon (Wireless microphone)", "defaultSampleRate": 44100, "maxInputChannels": 2, "isLoopbackDevice": False}
+
+    mock_pyaudio.get_device_info_by_index.side_effect = lambda idx: dev_wasapi if idx == 9 else dev_mme
+
+    fallback_stream = MagicMock()
+    fallback_stream.is_active.return_value = True
+
+    def mock_open(**kwargs):
+        if kwargs.get("input_device_index") == 9:
+            raise OSError(-9997, "Invalid sample rate on WASAPI")
+        return fallback_stream
+
+    mock_pyaudio.open.side_effect = mock_open
+
+    with patch("recorder.ui.workers.pyaudio.PyAudio", return_value=mock_pyaudio), \
+         patch("time.sleep", return_value=None):
+        with patch.object(worker, "msleep", side_effect=lambda ms: setattr(worker, "_is_running", False)):
+            worker.device_index = 9
+            worker.run()
+
+    fallback_stream.start_stream.assert_called()
+
+
+
 
 
 

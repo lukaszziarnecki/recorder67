@@ -14,10 +14,47 @@ try:
 except ImportError:
     HAS_PYCAW = False
 
+import re
+
+
+def clean_device_name(raw_name: str) -> str:
+    """
+    Oczyszcza nazwę urządzenia audio z technicznych dopisków interfejsu
+    (np. MME, WASAPI, DirectSound, Loopback).
+    """
+    if not raw_name:
+        return ""
+    name = raw_name.replace(" [Loopback]", "").strip()
+    name = re.sub(
+        r'\s*\((?:MME|Windows DirectSound|Windows WASAPI|WASAPI|DirectSound|WDM-KS)\)\s*$',
+        '',
+        name,
+        flags=re.IGNORECASE
+    ).strip()
+    return name
+
+
+def is_mapper_pseudo_device(raw_name: str) -> bool:
+    """
+    Sprawdza, czy urządzenie jest sztucznym aliasem mapera audio systemu Windows
+    (np. 'Mapowanie dźwięku Microsoft - Input', 'Podstawowy sterownik przechwytywania dźwięku').
+    """
+    if not raw_name:
+        return False
+    name_lower = raw_name.lower()
+    mapper_keywords = (
+        "mapowanie d", "mapper", "podstawowy sterownik", 
+        "primary sound", "default audio capture"
+    )
+    return any(k in name_lower for k in mapper_keywords)
+
 
 def get_working_input_devices(force_refresh: bool = False) -> List[Dict[str, Any]]:
     """
     Pobiera listę sprawnych urządzeń wejściowych (mikrofonów), ignorując surowe sterowniki WDM-KS.
+    Deduplikuje ten sam fizyczny mikrofon występujący w wielu interfejsach (MME, DirectSound, WASAPI),
+    automatycznie wybierając najstabilniejszy interfejs Windows WASAPI jako nadrzędny (primary),
+    zapisuje alternatywne indeksy jako fallback oraz oznacza domyślny mikrofon systemowy.
     """
     valid_devices = []
     if HAS_PYAUDIOWPATCH:
@@ -25,23 +62,103 @@ def get_working_input_devices(force_refresh: bool = False) -> List[Dict[str, Any
         try:
             p = pyaudio.PyAudio()
             hostapis = {}
+            default_wasapi_mic_idx = None
+            default_general_mic_idx = None
+
+            try:
+                def_dev = p.get_default_input_device_info()
+                if def_dev:
+                    default_general_mic_idx = def_dev.get('index')
+            except Exception:
+                pass
+
             for i in range(p.get_host_api_count()):
                 info = p.get_host_api_info_by_index(i)
-                hostapis[i] = info.get('name', '')
+                api_name = info.get('name', '')
+                hostapis[i] = api_name
+                if 'WASAPI' in api_name:
+                    default_wasapi_mic_idx = info.get('defaultInputDevice')
 
+            target_default_idx = default_wasapi_mic_idx if default_wasapi_mic_idx is not None else default_general_mic_idx
+
+            grouped_devices = {}
             for idx in range(p.get_device_count()):
                 dev = p.get_device_info_by_index(idx)
                 if dev.get('maxInputChannels', 0) > 0 and not dev.get('isLoopbackDevice', False) and '[Loopback]' not in dev.get('name', ''):
                     hostapi_name = hostapis.get(dev.get('hostApi', 0), '')
                     if "WDM-KS" in hostapi_name:
                         continue
-                    valid_devices.append({
-                        'index': idx,
-                        'name': dev['name'],
+
+                    raw_name = dev.get('name', '')
+                    c_name = clean_device_name(raw_name)
+                    is_map = is_mapper_pseudo_device(raw_name)
+
+                    if c_name not in grouped_devices:
+                        grouped_devices[c_name] = {
+                            'name': c_name,
+                            'raw_name': raw_name,
+                            'is_mapper': is_map,
+                            'variants': [],
+                            'is_default': False,
+                        }
+
+                    h_upper = hostapi_name.upper()
+                    if "WASAPI" in h_upper:
+                        rank = 3
+                    elif "DIRECTSOUND" in h_upper:
+                        rank = 2
+                    elif "MME" in h_upper:
+                        rank = 1
+                    else:
+                        rank = 0
+
+                    dev_index = dev.get('index', idx)
+                    is_this_def = (dev_index == target_default_idx) or (default_general_mic_idx is not None and dev_index == default_general_mic_idx)
+                    if is_this_def:
+                        grouped_devices[c_name]['is_default'] = True
+
+                    grouped_devices[c_name]['variants'].append({
+                        'rank': rank,
+                        'index': dev_index,
                         'hostapi': hostapi_name,
                         'channels': int(dev['maxInputChannels']),
-                        'samplerate': int(dev.get('defaultSampleRate', 16000))
+                        'samplerate': int(dev.get('defaultSampleRate', 16000)),
+                        'raw_info': dev,
+                        'is_default': is_this_def
                     })
+
+            # Jeśli są dostępne rzeczywiste mikrofony fizyczne, odrzucamy aliasy maperów Windows
+            candidate_groups = [g for g in grouped_devices.values() if not g['is_mapper']]
+            if not candidate_groups:
+                candidate_groups = list(grouped_devices.values())
+
+            for g in candidate_groups:
+                g['variants'].sort(key=lambda v: v['rank'], reverse=True)
+                primary = g['variants'][0]
+                fallback_indices = [v['index'] for v in g['variants'][1:]]
+                api_variants = {v['hostapi']: v['index'] for v in g['variants']}
+
+                is_def = g['is_default']
+                label = f"🎤 {g['name']}"
+                if is_def:
+                    label += " (Domyślne)"
+
+                valid_devices.append({
+                    'index': primary['index'],
+                    'name': g['name'],
+                    'label': label,
+                    'hostapi': primary['hostapi'],
+                    'channels': primary['channels'],
+                    'samplerate': primary['samplerate'],
+                    'is_default': is_def,
+                    'fallback_indices': fallback_indices,
+                    'api_variants': api_variants,
+                    'raw_info': primary['raw_info']
+                })
+
+            # Sortujemy tak, aby mikrofon domyślny był zawsze na samej górze
+            valid_devices.sort(key=lambda d: 1 if d.get('is_default') else 0, reverse=True)
+
         except Exception as e:
             print(f"Błąd wykrywania mikrofonów PyAudio: {e}")
         finally:
@@ -58,6 +175,7 @@ def get_working_input_devices(force_refresh: bool = False) -> List[Dict[str, Any
         devices = sd.query_devices()
         hostapis = sd.query_hostapis()
 
+        grouped_sd = {}
         for idx, dev in enumerate(devices):
             if dev.get('max_input_channels', 0) > 0:
                 hostapi_idx = dev.get('hostapi', 0)
@@ -67,13 +185,42 @@ def get_working_input_devices(force_refresh: bool = False) -> List[Dict[str, Any
                 if "WDM-KS" in hostapi_name:
                     continue
 
-                valid_devices.append({
+                raw_name = dev.get('name', '')
+                c_name = clean_device_name(raw_name)
+                is_map = is_mapper_pseudo_device(raw_name)
+
+                if c_name not in grouped_sd:
+                    grouped_sd[c_name] = {
+                        'name': c_name,
+                        'raw_name': raw_name,
+                        'is_mapper': is_map,
+                        'variants': []
+                    }
+
+                h_upper = hostapi_name.upper()
+                rank = 3 if "WASAPI" in h_upper else (2 if "DIRECTSOUND" in h_upper else (1 if "MME" in h_upper else 0))
+                grouped_sd[c_name]['variants'].append({
+                    'rank': rank,
                     'index': idx,
-                    'name': dev['name'],
                     'hostapi': hostapi_name,
                     'channels': dev['max_input_channels'],
                     'samplerate': int(dev.get('default_samplerate', 16000))
                 })
+
+        candidate_sd = [g for g in grouped_sd.values() if not g['is_mapper']] or list(grouped_sd.values())
+        for g in candidate_sd:
+            g['variants'].sort(key=lambda v: v['rank'], reverse=True)
+            primary = g['variants'][0]
+            valid_devices.append({
+                'index': primary['index'],
+                'name': g['name'],
+                'label': f"🎤 {g['name']}",
+                'hostapi': primary['hostapi'],
+                'channels': primary['channels'],
+                'samplerate': primary['samplerate'],
+                'is_default': False,
+                'fallback_indices': [v['index'] for v in g['variants'][1:]]
+            })
     except Exception as e:
         print(f"Błąd wykrywania urządzeń audio: {e}")
 
