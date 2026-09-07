@@ -33,7 +33,7 @@ from recorder.config import (
 )
 from recorder.audio.capture import save_wav_file, StreamingWavWriter
 from recorder.audio.converter import resample_to_16k, prepare_audio_file
-from recorder.audio.devices import HAS_PYAUDIOWPATCH, TargetAppAudioMonitor
+from recorder.audio.devices import HAS_PYAUDIOWPATCH, TargetAppAudioMonitor, clean_device_name
 from recorder.core.vad import SileroVADDetector, is_silero_available
 from recorder.core.transcriber import TranscriberEngine
 from recorder.core.diarizer import DiarizationEngine, format_transcript_without_diarization
@@ -595,14 +595,18 @@ class SmartAudioWorker(QThread):
                 if loopback_dev:
                     sys_native_sr = int(loopback_dev.get("defaultSampleRate", 48000))
                     sys_channels = int(loopback_dev.get("maxInputChannels", 2))
+                    last_loop_chunk_time = time.time()
 
                     def loopback_callback(in_data, frame_count, time_info, status):
+                        nonlocal last_loop_chunk_time
                         if not self._is_running or self.state == SmartRecordState.STOPPED:
                             return (None, pyaudio.paAbort)
                         if self.state == SmartRecordState.MANUAL_PAUSED or not in_data or self.sys_muted or time.time() < self.suppress_sys_until:
                             if self.sys_muted or time.time() < self.suppress_sys_until:
                                 self.sys_level = 0.0
                             return (None, pyaudio.paContinue)
+
+                        last_loop_chunk_time = time.time()
 
                         # Izolacja wybranej aplikacji audio: jeśli wybrano konkretną aplikację (np. Discord),
                         # a ta aplikacja w tej chwili nie generuje dźwięku, odrzucamy próbki tła (np. YouTube)
@@ -737,14 +741,18 @@ class SmartAudioWorker(QThread):
                 if mic_dev_info:
                     mic_sr = int(mic_dev_info.get("defaultSampleRate", 16000))
                     mic_ch = max(1, int(mic_dev_info.get("maxInputChannels", 1)))
+                    last_mic_chunk_time = time.time()
 
                     def mic_callback(in_data, frame_count, time_info, status):
+                        nonlocal last_mic_chunk_time
                         if not self._is_running or self.state == SmartRecordState.STOPPED:
                             return (None, pyaudio.paAbort)
                         if self.state == SmartRecordState.MANUAL_PAUSED or not in_data or self.mic_muted:
                             if self.mic_muted:
                                 self.mic_level = 0.0
                             return (None, pyaudio.paContinue)
+
+                        last_mic_chunk_time = time.time()
 
                         try:
                             raw_np = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0
@@ -830,25 +838,48 @@ class SmartAudioWorker(QThread):
                         return (None, pyaudio.paContinue)
 
                     last_mic_err = None
-                    for attempt in range(3):
-                        try:
-                            mic_stream = p_audio.open(
-                                format=pyaudio.paInt16,
-                                channels=mic_ch,
-                                rate=mic_sr,
-                                input=True,
-                                input_device_index=mic_dev_info["index"],
-                                frames_per_buffer=1024,
-                                stream_callback=mic_callback
-                            )
-                            mic_stream.start_stream()
-                            last_mic_err = None
+                    target_clean_name = clean_device_name(mic_dev_info.get("name", "")) if (mic_dev_info and isinstance(mic_dev_info, dict)) else ""
+                    candidate_mic_devices = [mic_dev_info] if mic_dev_info else []
+                    try:
+                        c_val = p_audio.get_device_count()
+                        dev_cnt = c_val if isinstance(c_val, int) else 0
+                        for c_idx in range(dev_cnt):
+                            if mic_dev_info and c_idx == mic_dev_info.get("index"):
+                                continue
+                            cand = p_audio.get_device_info_by_index(c_idx)
+                            if cand.get("maxInputChannels", 0) > 0 and not cand.get("isLoopbackDevice", False):
+                                if target_clean_name and clean_device_name(cand.get("name", "")) == target_clean_name:
+                                    candidate_mic_devices.append(cand)
+                    except Exception:
+                        pass
+
+                    for cand_dev in candidate_mic_devices:
+                        c_sr = int(cand_dev.get("defaultSampleRate", 16000))
+                        c_ch = max(1, int(cand_dev.get("maxInputChannels", 1)))
+                        for attempt in range(3):
+                            try:
+                                mic_stream = p_audio.open(
+                                    format=pyaudio.paInt16,
+                                    channels=c_ch,
+                                    rate=c_sr,
+                                    input=True,
+                                    input_device_index=cand_dev["index"],
+                                    frames_per_buffer=1024,
+                                    stream_callback=mic_callback
+                                )
+                                mic_stream.start_stream()
+                                mic_dev_info = cand_dev
+                                mic_sr = c_sr
+                                mic_ch = c_ch
+                                last_mic_err = None
+                                break
+                            except Exception as open_err:
+                                last_mic_err = open_err
+                                print(f"[SmartAudioWorker] Próba {attempt + 1}/3 otwarcia mikrofonu ({cand_dev.get('name')}, idx {cand_dev.get('index')}) nie powiodła się: {open_err}")
+                                if attempt < 2:
+                                    time.sleep(0.3)
+                        if mic_stream is not None:
                             break
-                        except Exception as open_err:
-                            last_mic_err = open_err
-                            print(f"[SmartAudioWorker] Próba {attempt + 1}/3 otwarcia mikrofonu nie powiodła się: {open_err}")
-                            if attempt < 2:
-                                time.sleep(0.3)
 
                     if mic_stream is None:
                         raise RuntimeError(f"Błąd otwarcia mikrofonu po 3 próbach: {last_mic_err}")
@@ -860,6 +891,172 @@ class SmartAudioWorker(QThread):
         if (run_mic and mic_stream is None) and (not run_sys or loop_stream is None):
             self._is_running = False
             return
+
+        def _reopen_mic_stream():
+            nonlocal mic_stream, p_audio, mic_dev_info, mic_sr, mic_ch, last_mic_chunk_time
+            print("[SmartAudioWorker WATCHDOG] Strumień mikrofonu był nieaktywny lub zablokowany! Restartowanie...")
+            if mic_stream is not None:
+                try:
+                    if mic_stream.is_active():
+                        mic_stream.stop_stream()
+                except Exception:
+                    pass
+                try:
+                    mic_stream.close()
+                except Exception:
+                    pass
+                mic_stream = None
+
+            target_name = clean_device_name(mic_dev_info.get("name", "")) if (mic_dev_info and isinstance(mic_dev_info, dict)) else ""
+            reopen_cands = []
+            if mic_dev_info and isinstance(mic_dev_info, dict) and "index" in mic_dev_info:
+                reopen_cands.append(mic_dev_info)
+
+            try:
+                c_val = p_audio.get_device_count()
+                dev_cnt = c_val if isinstance(c_val, int) else 0
+                for c_idx in range(dev_cnt):
+                    if mic_dev_info and c_idx == mic_dev_info.get("index"):
+                        continue
+                    cand = p_audio.get_device_info_by_index(c_idx)
+                    if cand.get("maxInputChannels", 0) > 0 and not cand.get("isLoopbackDevice", False):
+                        if target_name and clean_device_name(cand.get("name", "")) == target_name:
+                            reopen_cands.append(cand)
+            except Exception:
+                pass
+
+            for cand_dev in reopen_cands:
+                c_sr = int(cand_dev.get("defaultSampleRate", 16000))
+                c_ch = max(1, int(cand_dev.get("maxInputChannels", 1)))
+                try:
+                    new_s = p_audio.open(
+                        format=pyaudio.paInt16,
+                        channels=c_ch,
+                        rate=c_sr,
+                        input=True,
+                        input_device_index=cand_dev["index"],
+                        frames_per_buffer=1024,
+                        stream_callback=mic_callback
+                    )
+                    new_s.start_stream()
+                    if new_s.is_active():
+                        mic_stream = new_s
+                        mic_dev_info = cand_dev
+                        mic_sr = c_sr
+                        mic_ch = c_ch
+                        last_mic_chunk_time = time.time()
+                        print(f"[SmartAudioWorker WATCHDOG] Pomyślnie przywrócono strumień mikrofonu ({cand_dev.get('name')}, idx {cand_dev.get('index')})!")
+                        return True
+                    else:
+                        try:
+                            new_s.close()
+                        except Exception:
+                            pass
+                except Exception as ro_err:
+                    print(f"[SmartAudioWorker WATCHDOG] Błąd otwarcia mikrofonu (indeks {cand_dev.get('index')}): {ro_err}")
+
+            # Jeśli ponowne otwarcie na p_audio się nie powiodło (np. odłączenie odbiornika USB):
+            print("[SmartAudioWorker WATCHDOG] Re-inicjalizacja instancji PyAudio po uśpieniu lub resecie USB...")
+            try:
+                if loop_stream is not None:
+                    try:
+                        if loop_stream.is_active():
+                            loop_stream.stop_stream()
+                        loop_stream.close()
+                    except Exception:
+                        pass
+                    loop_stream = None
+                p_audio.terminate()
+            except Exception:
+                pass
+            time.sleep(0.3)
+            try:
+                p_audio = pyaudio.PyAudio()
+                new_dev = None
+                if target_name:
+                    c_val = p_audio.get_device_count()
+                    dev_cnt = c_val if isinstance(c_val, int) else 0
+                    for idx in range(dev_cnt):
+                        cand = p_audio.get_device_info_by_index(idx)
+                        if cand.get("maxInputChannels", 0) > 0 and not cand.get("isLoopbackDevice", False):
+                            if clean_device_name(cand.get("name", "")) == target_name:
+                                new_dev = cand
+                                break
+                if not new_dev:
+                    try:
+                        new_dev = p_audio.get_default_input_device_info()
+                    except Exception:
+                        pass
+                if new_dev:
+                    mic_dev_info = new_dev
+                    mic_sr = int(mic_dev_info.get("defaultSampleRate", 16000))
+                    mic_ch = max(1, int(mic_dev_info.get("maxInputChannels", 1)))
+                    new_s = p_audio.open(
+                        format=pyaudio.paInt16,
+                        channels=mic_ch,
+                        rate=mic_sr,
+                        input=True,
+                        input_device_index=mic_dev_info["index"],
+                        frames_per_buffer=1024,
+                        stream_callback=mic_callback
+                    )
+                    new_s.start_stream()
+                    if new_s.is_active():
+                        mic_stream = new_s
+                        last_mic_chunk_time = time.time()
+                        print(f"[SmartAudioWorker WATCHDOG] Mikrofon pomyślnie zreaktywowany po re-inicjalizacji: {mic_dev_info.get('name')}")
+                        if run_sys and not loop_stream:
+                            _reopen_loop_stream()
+                        return True
+            except Exception as re_init_err:
+                print(f"[SmartAudioWorker WATCHDOG] Błąd ponownej inicjalizacji PyAudio: {re_init_err}")
+            return False
+
+        def _reopen_loop_stream():
+            nonlocal loop_stream, p_audio, loopback_dev, sys_native_sr, sys_channels, last_loop_chunk_time
+            print("[SmartAudioWorker WATCHDOG] Restartowanie strumienia WASAPI Loopback...")
+            if loop_stream is not None:
+                try:
+                    if loop_stream.is_active():
+                        loop_stream.stop_stream()
+                except Exception:
+                    pass
+                try:
+                    loop_stream.close()
+                except Exception:
+                    pass
+                loop_stream = None
+
+            try:
+                def_l = None
+                try:
+                    def_l = p_audio.get_default_wasapi_loopback()
+                except Exception:
+                    pass
+                if def_l and (not loopback_dev or loopback_dev.get("index") != def_l.get("index")):
+                    loopback_dev = def_l
+                    sys_native_sr = int(loopback_dev.get("defaultSampleRate", 48000))
+                    sys_channels = int(loopback_dev.get("maxInputChannels", 2))
+
+                if loopback_dev:
+                    new_l_stream = p_audio.open(
+                        format=pyaudio.paInt16,
+                        channels=sys_channels,
+                        rate=sys_native_sr,
+                        input=True,
+                        input_device_index=loopback_dev["index"],
+                        frames_per_buffer=1024,
+                        stream_callback=loopback_callback
+                    )
+                    new_l_stream.start_stream()
+                    if new_l_stream.is_active():
+                        loop_stream = new_l_stream
+                        last_loop_chunk_time = time.time()
+                        print(f"[SmartAudioWorker WATCHDOG] Pomyślnie zrestartowano strumień loopback: {loopback_dev.get('name')}")
+                        return True
+            except Exception as l_err:
+                print(f"[SmartAudioWorker WATCHDOG] Błąd restartu strumienia loopback: {l_err}")
+            return False
 
         # Pętla monitorowania poziomów, stanu ciszy i strumieniowego zapisu zmiksowanego audio
         last_watchdog_check = time.time()
@@ -878,20 +1075,50 @@ class SmartAudioWorker(QThread):
                 now_tick = time.time()
                 if now_tick - last_watchdog_check >= 1.5:
                     last_watchdog_check = now_tick
-                    if run_mic and mic_stream is not None:
+                    if run_mic and mic_stream is not None and self.state not in (SmartRecordState.STOPPED, SmartRecordState.MANUAL_PAUSED) and not self.mic_muted:
+                        mic_failed = False
                         try:
-                            if not mic_stream.is_active() and self.state not in (SmartRecordState.STOPPED, SmartRecordState.MANUAL_PAUSED):
-                                print("[SmartAudioWorker WATCHDOG] Strumień mikrofonu był nieaktywny! Wznawianie...")
-                                mic_stream.start_stream()
-                        except Exception as we:
-                            print(f"[SmartAudioWorker WATCHDOG] Błąd wznawiania mikrofonu: {we}")
-                    if run_sys and loop_stream is not None:
+                            if not mic_stream.is_active():
+                                mic_failed = True
+                            elif (now_tick - last_mic_chunk_time) > 4.0:
+                                print(f"[SmartAudioWorker WATCHDOG] Stagnacja bufora mikrofonu (> {now_tick - last_mic_chunk_time:.1f}s bez danych)!")
+                                mic_failed = True
+                        except Exception:
+                            mic_failed = True
+
+                        if mic_failed:
+                            quick_ok = False
+                            try:
+                                if not mic_stream.is_active():
+                                    mic_stream.start_stream()
+                                    if mic_stream.is_active() and (now_tick - last_mic_chunk_time) <= 2.0:
+                                        quick_ok = True
+                            except Exception:
+                                pass
+                            if not quick_ok:
+                                _reopen_mic_stream()
+
+                    if run_sys and loop_stream is not None and self.state not in (SmartRecordState.STOPPED, SmartRecordState.MANUAL_PAUSED) and not self.sys_muted:
+                        loop_failed = False
                         try:
-                            if not loop_stream.is_active() and self.state not in (SmartRecordState.STOPPED, SmartRecordState.MANUAL_PAUSED):
-                                print("[SmartAudioWorker WATCHDOG] Strumień loopback był nieaktywny! Wznawianie...")
-                                loop_stream.start_stream()
-                        except Exception as we:
-                            print(f"[SmartAudioWorker WATCHDOG] Błąd wznawiania loopback: {we}")
+                            if not loop_stream.is_active():
+                                loop_failed = True
+                            elif (now_tick - last_loop_chunk_time) > 4.0:
+                                loop_failed = True
+                        except Exception:
+                            loop_failed = True
+
+                        if loop_failed:
+                            quick_l_ok = False
+                            try:
+                                if not loop_stream.is_active():
+                                    loop_stream.start_stream()
+                                    if loop_stream.is_active() and (now_tick - last_loop_chunk_time) <= 2.0:
+                                        quick_l_ok = True
+                            except Exception:
+                                pass
+                            if not quick_l_ok:
+                                _reopen_loop_stream()
 
                 # Emisja poziomów VU Meter
                 m_lvl = float(self.mic_level)
