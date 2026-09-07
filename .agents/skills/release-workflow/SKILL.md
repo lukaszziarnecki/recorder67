@@ -1,4 +1,4 @@
-﻿---
+---
 name: release-workflow
 description: >-
   Kompletna procedura przygotowania, weryfikacji i publikacji nowego wydania aplikacji recorder67.
@@ -59,5 +59,5 @@ Wersja **vX.Y.Z** wprowadza [zwięzłe podsumowanie głównego celu wydania w 1-
 ### Poprawki błędów i usprawnienia
 * **Opis naprawionego zachowania:** Co wcześniej nie działało lub zachowywało się niepoprawnie, a teraz działa prawidłowo.
 
-**Pełna lista zmian:** <https://github.com/igorkozielek/recorder67/compare/vPoprzednia...vX.Y.Z>
+**Pełna lista zmian:** <https://github.com/lukaszziarnecki/recorder67/compare/vPoprzednia...vX.Y.Z>
 ```

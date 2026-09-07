@@ -74,6 +74,8 @@ graph TD
   - Opcjonalny bieg turbo (Adaptacyjny Whisper Turbo) dynamicznie przyspieszający inferencję (`beam_size=1`) przy zatorach w kolejce z zachowaniem bazowej precyzji (`beam_size=5`).
   - Natychmiastowe wypychanie mowy przy wyciszeniu (Flush on Mute) oraz bufor pre-speech eliminujący ucinanie głosek.
   - Pętla retry dla urządzeń WASAPI Bluetooth rozwiązująca błąd `[Errno -9996] Invalid device`.
+  - Samonaprawiający się Watchdog audio: wielostopniowe wznawianie zawieszonych buforów urządzeń (Hollyland, mikrofony USB/Bluetooth) w locie bez utraty sesji nagrania.
+  - Czysta lista mikrofonów: automatyczna deduplikacja urządzeń audio w GUI, filtr mapperów Windows i priorytetyzacja natywnego WASAPI z fallbackiem.
   - Płynny stoper zegarowy z akumulatorem monotonicznym 200 ms.
 - [x] **Nowoczesny Auto-Updater z Paskiem Postępu (WinForms GUI)**: Graficzne okno instalatora PowerShell WinForms z wizualnym paskiem postępu i komunikatami o poszczególnych etapach instalacji w locie (in-place update z automatycznym restartem i fallbackiem wsadowym).
 - [x] **Bogaty Changelog Markdown & Przeglądarka Historii**: Obsługa pełnego formatowania CommonMark w oknie Ustawień, wielowersyjna agregacja pominiętych wydań, elastyczny scroll area i przeglądanie starszych wersji.
