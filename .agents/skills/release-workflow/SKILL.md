@@ -38,10 +38,18 @@ description: >-
 * Workflow `.github/workflows/release.yml` buduje paczkę `.zip` (ok. 10–13 min).
 * Monitoruj status przez GitHub API do momentu ukończenia kroku `Publish GitHub Release`.
 
-## Krok 7: Redagowanie Release Notes dla Użytkowników Końcowych
-Zaktualizuj opis wydania przez GitHub API (PATCH `/releases/:id`). Stosuj następujące zasady redakcyjne:
+## Krok 7: Redagowanie Tytułu i Release Notes dla Użytkowników Końcowych
+Zaktualizuj tytuł (`name`) oraz opis (`body`) wydania przez GitHub API (PATCH `/releases/:id`). Stosuj następujące zasady redakcyjne:
 
-### Zasady Redakcyjne (Dla Użytkowników Aplikacji):
+### Format Tytułu Wydania:
+GitHub Actions domyślnie ustawia roboczy tytuł `Release vX.Y.Z`. **Zawsze zaktualizuj go** do formatu:
+`vX.Y.Z: [Zwięzła, zrozumiała dla użytkownika nazwa głównych zmian / poprawek]`
+*Przykłady:*
+- Wydanie główne: `v0.7.0: Wygląd i Personalizacja`
+- Łatka stabilności / hotfix: `v0.6.1: Stabilizacja synchronizacji na żywo z CRM i odporność na zakłócenia sieci`
+- Łatka komponentu: `v0.7.1: Samonaprawiający się watchdog mikrofonu, deduplikacja urządzeń i priorytet WASAPI`
+
+### Zasady Redakcyjne Opisu (Dla Użytkowników Aplikacji):
 1. **Czysta delta:** Opisuj wyłącznie realną różnicę między poprzednim wydaniem a obecnym. Pomijaj próby robocze, eksperymenty z czatu czy błędy popełnione i naprawione w trakcie pracy nad danym wydaniem.
 2. **Język korzyści i funkcji:** Pisz przystępnym językiem dla użytkownika programu, unikając nazw zmiennych, technicznych funkcji czy fragmentów kodu (chyba że chodzi o konfigurację `.env`).
 3. **Umiar w emotkach:** Stosuj czysty, profesjonalny styl bez nadmiaru ikon.
