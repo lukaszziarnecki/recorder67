@@ -27,6 +27,11 @@ x86/
 TestResults/
 [Tt]est[Rr]esults/
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
 
 # Audio Recordings & Output Files (Pliki nagrań audio)
 recordings/
